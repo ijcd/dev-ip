@@ -1,0 +1,250 @@
+#!/usr/bin/env bash
+# dev-ip — one loopback IP + hostname per workspace/branch, resolved via a
+# dedicated user dnsmasq. Imperative shell: composes lib/dev-ip-lib.sh (the
+# pure core) and performs IO. See docs/dev-ip-plan.md.
+set -euo pipefail
+
+DEVIP_LIB="${DEVIP_LIB:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)/dev-ip-lib.sh}"
+# shellcheck source=../lib/dev-ip-lib.sh
+source "$DEVIP_LIB"
+
+# --- host-layer seams (paths overridable in tests) -------------------------
+: "${DEVIP_RESOLVER_DIR:=/etc/resolver}"
+: "${DEVIP_LAUNCHAGENTS:=$HOME/Library/LaunchAgents}"
+: "${DEVIP_LAUNCHDAEMONS:=/Library/LaunchDaemons}"
+: "${DEVIP_PF_CONF:=/etc/pf.conf}"
+: "${DEVIP_PF_ANCHOR_FILE:=/etc/pf.anchors/dev-ip}"
+
+CHECK=0            # 1 = dry-run (detect + print, never mutate)
+MANAGED_BY_NIX=0   # set by step 1
+
+# _run DESC CMD... -> in --check, print intent only; else log to DEVIP_CALL_LOG and run.
+_run() {
+  local desc="$1"; shift
+  if [ "$CHECK" -eq 1 ]; then
+    printf '  would: %s\n' "$desc"
+    return 0
+  fi
+  printf '%s\n' "$*" >> "${DEVIP_CALL_LOG:-/dev/null}"
+  "$@"
+}
+
+step_classify() {   # step 1
+  if launchctl print system/com.local.loopback-aliases >/dev/null 2>&1; then
+    MANAGED_BY_NIX=1
+    printf 'host: nix-managed (loopback+pf owned by nix; steps 2-3 skip)\n'
+  else
+    printf 'host: stock Mac (dev-ip manages loopback+pf)\n'
+  fi
+}
+
+_pool_aliased() {   # true if every pool IP is already on lo0
+  local o out bounds start end
+  out="$(ifconfig lo0 2>/dev/null)"
+  bounds="$(_pool_bounds)" || return 1
+  start="${bounds% *}"; end="${bounds#* }"
+  for o in $(seq "$start" "$end"); do
+    case "$out" in *"127.0.0.$o "*|*"127.0.0.$o"$'\n'*) ;; *) return 1 ;; esac
+  done
+  return 0
+}
+
+step_loopback() {   # step 2 — stock Mac only, root LaunchDaemon
+  local plist="$DEVIP_LAUNCHDAEMONS/dev-ip-loopback.plist" desired
+  if [ "$MANAGED_BY_NIX" -eq 1 ]; then printf 'loopback: nix-managed, skip\n'; return 0; fi
+  # NOTE: "aliased now" != "persisted across boot" — if aliases exist but our
+  # daemon is missing/stale, they won't survive reboot. Spec-conformant detect;
+  # tradeoff accepted, not fixed here.
+  if _pool_aliased; then printf 'loopback: all pool IPs already aliased\n'; return 0; fi
+  desired="$(render_loopback_plist)"
+  if [ -f "$plist" ] && printf '%s\n' "$desired" | cmp -s - "$plist"; then
+    printf 'loopback: daemon up to date\n'; return 0
+  fi
+  _run "mkdir -p $DEVIP_LAUNCHDAEMONS" mkdir -p "$DEVIP_LAUNCHDAEMONS"
+  if [ "$CHECK" -eq 1 ]; then printf '  would: write %s + load daemon\n' "$plist"; return 0; fi
+  printf '%s\n' "write $plist" >> "${DEVIP_CALL_LOG:-/dev/null}"
+  printf '%s\n' "$desired" | sudo tee "$plist" >/dev/null
+  _run "launchctl bootout system $plist" launchctl bootout system "$plist" 2>/dev/null || true
+  _run "launchctl bootstrap system $plist" sudo launchctl bootstrap system "$plist"
+}
+
+step_pf() {   # step 3 — stock Mac only, per-IP hairpin NAT
+  local anchor="$DEVIP_PF_ANCHOR_FILE" desired changed=0
+  if [ "$MANAGED_BY_NIX" -eq 1 ]; then printf 'pf: nix-managed, skip\n'; return 0; fi
+  if pfctl -a loopback_dev -s nat 2>/dev/null | grep -q '^nat'; then
+    printf 'pf: nix loopback_dev anchor present, skip\n'; return 0
+  fi
+  desired="$(render_pf_anchor)"
+  if [ "$CHECK" -eq 1 ]; then printf '  would: write %s + load pf anchor\n' "$anchor"; return 0; fi
+  if ! { [ -f "$anchor" ] && printf '%s\n' "$desired" | cmp -s - "$anchor"; }; then
+    _run "mkdir -p $(dirname "$anchor")" mkdir -p "$(dirname "$anchor")"
+    printf '%s\n' "write $anchor" >> "${DEVIP_CALL_LOG:-/dev/null}"
+    printf '%s\n' "$desired" | sudo tee "$anchor" >/dev/null
+    changed=1
+  fi
+  if ! grep -qE '^(nat-anchor|load anchor) "dev-ip"' "$DEVIP_PF_CONF" 2>/dev/null; then
+    printf '%s\n' "append pf.conf include" >> "${DEVIP_CALL_LOG:-/dev/null}"
+    printf 'nat-anchor "dev-ip"\nload anchor "dev-ip" from "%s"\n' "$anchor" | sudo tee -a "$DEVIP_PF_CONF" >/dev/null
+    changed=1
+  fi
+  if [ "$changed" -eq 0 ]; then printf 'pf: anchor + pf.conf up to date\n'; return 0; fi
+  _run "pfctl -f $DEVIP_PF_CONF" sudo pfctl -f "$DEVIP_PF_CONF"
+  _run "pfctl -e" sudo pfctl -e 2>/dev/null || true
+}
+
+step_dnsmasq_bin() {   # step 4
+  if command -v dnsmasq >/dev/null 2>&1; then
+    printf 'dnsmasq: found (%s)\n' "$(command -v dnsmasq)"
+    return 0
+  fi
+  printf 'dnsmasq: MISSING — run `brew install dnsmasq`\n' >&2
+  return 1
+}
+
+step_dnsmasq_agent() {   # step 5
+  local bin plist desired
+  bin="$(command -v dnsmasq 2>/dev/null || echo /opt/homebrew/bin/dnsmasq)"
+  plist="$DEVIP_LAUNCHAGENTS/dev-ip-dnsmasq.plist"
+  desired="$(render_dnsmasq_plist "$bin" "$(_hosts_dir)")"
+
+  if [ -f "$plist" ] && printf '%s\n' "$desired" | cmp -s - "$plist" \
+     && launchctl print "gui/$(id -u)/dev-ip-dnsmasq" >/dev/null 2>&1; then
+    printf 'dnsmasq agent: running, config current\n'
+    return 0
+  fi
+  _run "mkdir -p $DEVIP_LAUNCHAGENTS" mkdir -p "$DEVIP_LAUNCHAGENTS"
+  if [ "$CHECK" -eq 1 ]; then
+    printf '  would: write %s + reload agent\n' "$plist"
+    return 0
+  fi
+  printf '%s\n' "write $plist" >> "${DEVIP_CALL_LOG:-/dev/null}"
+  printf '%s\n' "$desired" > "$plist"
+  _run "launchctl bootout gui/$(id -u)/dev-ip-dnsmasq" \
+    launchctl bootout "gui/$(id -u)/dev-ip-dnsmasq" 2>/dev/null || true
+  _run "launchctl bootstrap gui/$(id -u) $plist" \
+    launchctl bootstrap "gui/$(id -u)" "$plist"
+}
+
+step_hostsd() {     # step 7
+  local d; d="$(_hosts_dir)"
+  if [ -d "$d" ]; then
+    printf 'hosts.d: present\n'
+  else
+    _run "mkdir -p $d" mkdir -p "$d"
+  fi
+}
+
+step_resolver() {   # step 6 (the one always-sudo bit)
+  local dir="$DEVIP_RESOLVER_DIR" file="$DEVIP_RESOLVER_DIR/devip"
+  if [ -f "$file" ] && printf '%s\n' "$(render_resolver)" | cmp -s - "$file"; then
+    printf 'resolver: %s up to date\n' "$file"
+    return 0
+  fi
+  _run "mkdir -p $dir" mkdir -p "$dir"
+  if [ "$CHECK" -eq 1 ]; then
+    printf '  would: write %s\n' "$file"
+    return 0
+  fi
+  printf 'sudo tee %s\n' "$file" >> "${DEVIP_CALL_LOG:-/dev/null}"
+  render_resolver | sudo tee "$file" >/dev/null
+}
+
+step_verify() {   # step 8 — always live (even under doctor/--check)
+  local ip got
+  ip="$(alloc_ip probe)"
+  got="$(dig +short @127.0.0.1 -p 5354 probe.devip 2>/dev/null | head -1)"
+  free_name probe
+  if [ "$got" = "$ip" ]; then
+    printf 'resolve probe: OK (probe.devip -> %s)\n' "$ip"
+    return 0
+  fi
+  printf 'resolve probe: FAIL (probe.devip -> %s, expected %s)\n' "${got:-<none>}" "$ip" >&2
+  return 1
+}
+
+do_provision() {
+  step_classify
+  step_loopback
+  step_pf
+  step_dnsmasq_bin
+  step_dnsmasq_agent
+  step_hostsd
+  step_resolver
+  [ "$CHECK" -eq 1 ] || step_verify
+}
+
+do_deprovision() {
+  local agent="$DEVIP_LAUNCHAGENTS/dev-ip-dnsmasq.plist"
+  local daemon="$DEVIP_LAUNCHDAEMONS/dev-ip-loopback.plist"
+
+  # dnsmasq user agent
+  launchctl bootout "gui/$(id -u)/dev-ip-dnsmasq" 2>/dev/null || true
+  rm -f "$agent"
+
+  # resolver (sudo)
+  [ -f "$DEVIP_RESOLVER_DIR/devip" ] && sudo rm -f "$DEVIP_RESOLVER_DIR/devip"
+
+  # pf anchor — only what dev-ip added (its include line + anchor file)
+  if grep -qE '^(nat-anchor|load anchor) "dev-ip"' "$DEVIP_PF_CONF" 2>/dev/null; then
+    grep -vE '^(nat-anchor|load anchor) "dev-ip"' "$DEVIP_PF_CONF" > "$DEVIP_PF_CONF.tmp" || true
+    sudo mv "$DEVIP_PF_CONF.tmp" "$DEVIP_PF_CONF"
+    sudo pfctl -f "$DEVIP_PF_CONF" 2>/dev/null || true
+  fi
+  [ -f "$DEVIP_PF_ANCHOR_FILE" ] && sudo rm -f "$DEVIP_PF_ANCHOR_FILE"
+
+  # loopback daemon — only if dev-ip installed it (nix's is a different label/path)
+  if [ -f "$daemon" ]; then
+    launchctl bootout system "$daemon" 2>/dev/null || true
+    sudo rm -f "$daemon"
+  fi
+  printf 'deprovision: dev-ip host changes removed\n'
+}
+
+do_doctor() {
+  CHECK=1
+  do_provision
+  CHECK=0
+  if [ "$MANAGED_BY_NIX" -eq 1 ] && ! _pool_aliased; then
+    local bounds start end
+    bounds="$(_pool_bounds)"; start="${bounds% *}"; end="${bounds#* }"
+    printf 'warning: DEVIP_POOL %s-%s not fully aliased on lo0; the host manages loopback and does not cover this range. Alias that range in your loopback config, or use a range it already provides.\n' "$start" "$end" >&2
+  fi
+  step_verify
+}
+
+usage() {
+  cat >&2 <<'EOF'
+usage: dev-ip <command> [args]
+
+  ip <name>      allocate (if needed) and print the loopback IP for <name>
+  alloc <name>   alias for `ip`
+  free <name>    release <name>'s allocation
+  ls             list allocations
+  provision      converge host resolver/loopback/pf/dnsmasq   (sudo: resolver)
+  doctor         provision --check + an end-to-end resolve probe
+  deprovision    remove dev-ip's host changes
+EOF
+}
+
+main() {
+  local cmd="${1:-}"
+  [ "$#" -gt 0 ] && shift
+  case "$cmd" in
+    ip | alloc | provision | doctor) _pool_bounds >/dev/null || return 1 ;;
+  esac
+  case "$cmd" in
+    ip | alloc)  alloc_ip "${1:?dev-ip: name required}" ;;
+    free)        free_name "${1:?dev-ip: name required}" ;;
+    ls)          list_allocations ;;
+    provision)
+      [ "${1:-}" = "--check" ] && CHECK=1
+      do_provision ;;
+    doctor)      do_doctor ;;
+    deprovision) do_deprovision ;;
+    -h | --help) usage; return 0 ;;
+    "")          usage; return 2 ;;
+    *)           echo "dev-ip: unknown command: $cmd" >&2; usage; return 2 ;;
+  esac
+}
+
+main "$@"

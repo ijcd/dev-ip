@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+printf 'dnsmasq %s\n' "$*" >> "${DEVIP_CALL_LOG:-/dev/null}"
+exit 0

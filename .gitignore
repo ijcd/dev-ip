@@ -1,0 +1,5 @@
+# subagent-driven-development scratch (ledgers, briefs, reports, diffs)
+.superpowers/
+
+# workflow process docs (plans/specs) — kept local, not published
+docs/superpowers/

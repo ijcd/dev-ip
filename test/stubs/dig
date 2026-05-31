@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Fake dig: log, and echo the IP the probe name maps to in hosts.d.
+printf 'dig %s\n' "$*" >> "${DEVIP_CALL_LOG:-/dev/null}"
+name=""
+for a in "$@"; do case "$a" in *.devip) name="${a%.devip}" ;; esac; done
+f="${DEVIP_HOME:-$HOME/.local/share/dev-ip}/hosts.d/$name"
+[ -f "$f" ] && awk '{print $1}' "$f" || true

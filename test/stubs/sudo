@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Fake sudo: log, then drop "sudo" and exec the rest (so `sudo tee X` still writes X).
+printf 'sudo %s\n' "$*" >> "${DEVIP_CALL_LOG:-/dev/null}"
+exec "$@"
