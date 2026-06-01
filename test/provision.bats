@@ -226,6 +226,15 @@ port 5354" ]
   [[ "$output" == *"doctor --fix"* ]]
 }
 
+@test "doctor shows a real delta (not a full add) for a drifted resolver" {
+  export DEVIP_STUB_ROUTE=ok DEVIP_STUB_PF_ENABLED=1 DEVIP_STUB_PF_LOADED=1 DEVIP_STUB_NIX_LOOPBACK=1 DEVIP_STUB_DNSMASQ_RUNNING=1
+  mkdir -p "$DEVIP_RESOLVER_DIR"
+  printf 'nameserver 9.9.9.9\n' > "$DEVIP_RESOLVER_DIR/devip"   # present but wrong -> drift, not absence
+  run "$DEVIP" doctor
+  [[ "$output" == *"-nameserver 9.9.9.9"* ]]
+  [[ "$output" == *"+nameserver 127.0.0.1"* ]]
+}
+
 @test "doctor --fix applies the owned fix and re-probes" {
   export DEVIP_STUB_ROUTE=ok DEVIP_STUB_PF_ENABLED=1 DEVIP_STUB_PF_LOADED=1 DEVIP_STUB_NIX_LOOPBACK=1 DEVIP_STUB_DNSMASQ_RUNNING=1
   run "$DEVIP" doctor --fix

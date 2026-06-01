@@ -237,16 +237,17 @@ _ck() {   # _ck ok|fail LABEL [REASON]
   else printf '  ✗ %s — %s\n' "$2" "$3"; fi
 }
 
-_fix_diff() {   # LABEL FILE RENDERED  -> print a unified diff (current vs desired)
-  printf '      %s:\n' "$2"
-  diff -u "$1" <(printf '%s\n' "$3") 2>/dev/null | sed -n '3,$p' | sed 's/^/      /' || true
+_fix_diff() {   # FILE RENDERED  -> unified diff of on-disk (or empty) vs desired
+  local cur="$1"; [ -f "$cur" ] || cur=/dev/null
+  printf '      %s:\n' "$1"
+  diff -u "$cur" <(printf '%s\n' "$2") 2>/dev/null | sed -n '3,$p' | sed 's/^/      /' || true
 }
 
 # _fix_* COMPONENT: in fix mode (fix=1) apply via the step (respecting nix
 # ownership); else print the fix. Called only from a ✗ branch of do_doctor.
 _fix_resolver() { local fix="$1"
   if [ "$fix" -eq 1 ]; then step_resolver >/dev/null; return 0; fi
-  _fix_diff /dev/null "$DEVIP_RESOLVER_DIR/devip" "$(render_resolver)"
+  _fix_diff "$DEVIP_RESOLVER_DIR/devip" "$(render_resolver)"
 }
 _fix_agent() { local fix="$1"
   if [ "$fix" -eq 1 ]; then step_dnsmasq_agent >/dev/null; return 0; fi
@@ -255,12 +256,12 @@ _fix_agent() { local fix="$1"
 _fix_loopback() { local fix="$1"
   if [ "$MANAGED_BY_NIX" -eq 1 ]; then printf '      nix manages loopback — alias this range in your nix config\n'; return 0; fi
   if [ "$fix" -eq 1 ]; then step_loopback >/dev/null; return 0; fi
-  _fix_diff /dev/null "$DEVIP_LAUNCHDAEMONS/dev-ip-loopback.plist" "$(render_loopback_plist)"
+  _fix_diff "$DEVIP_LAUNCHDAEMONS/dev-ip-loopback.plist" "$(render_loopback_plist)"
 }
 _fix_pf() { local fix="$1"
   if [ "$MANAGED_BY_NIX" -eq 1 ]; then printf '      nix manages pf — hairpin owned by nix\n'; return 0; fi
   if [ "$fix" -eq 1 ]; then step_pf >/dev/null; return 0; fi
-  _fix_diff /dev/null "$DEVIP_PF_ANCHOR_FILE" "$(render_pf_anchor)"
+  _fix_diff "$DEVIP_PF_ANCHOR_FILE" "$(render_pf_anchor)"
   printf '      then: sudo pfctl -f %s && sudo pfctl -e\n' "$DEVIP_PF_CONF"
 }
 
