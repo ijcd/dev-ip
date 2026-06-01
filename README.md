@@ -63,7 +63,7 @@ docker compose -p my-feature up -d          # compose reads ${LB_IP:-127.0.0.1}
 
 ### Diagnosing routing and resolution
 
-`doctor` probes six components (routing chain + resolution chain) and reports per-component status: alias presence and reachability on loopback, resolver file, dnsmasq agent, and resolution. For each failed check, `doctor` shows the exact fix — a unified diff for owned files, a command for actions. `doctor --fix` applies the dev-ip-owned fixes (skipping nix-managed loopback/PF). See ADR-0007.
+`doctor` probes four checks across two chains: loopback **reachability** (native bind+connect; alias missing if it fails), **pf hairpin loaded** (required for Docker/cross-IP); dnsmasq **(:5354) answering** (dig probe), **system resolver routes .devip** (dscacheutil probe — catches cases where dig passes but system DNS fails). For each failed check, `doctor` shows the exact fix — a unified diff for owned files (resolver, pf anchor, loopback daemon), a command for actions. `doctor --fix` applies the dev-ip-owned fixes (deferring nix-managed loopback/pf). See ADR-0007.
 
 ## Configuration
 

@@ -7,7 +7,7 @@ DEVIP="${DEVIP:-$(cd "$(dirname "$0")/../.." && pwd)/bin/dev-ip}"
 echo "== 1. clean provision =="
 sudo "$DEVIP" provision
 
-echo "== 2. doctor (resolve probe) =="
+echo "== 2. doctor (per-component report) =="
 "$DEVIP" doctor | tee /tmp/dev-ip-doctor.txt
 grep -q "all checks passed" /tmp/dev-ip-doctor.txt || { echo "FAIL: doctor checks failed"; exit 1; }
 
