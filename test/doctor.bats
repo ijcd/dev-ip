@@ -43,3 +43,9 @@ setup() {
   unset DEVIP_STUB_PF_LOADED
   run _pf_loaded; [ "$status" -ne 0 ]                   # enabled but no rules
 }
+
+@test "_agent_running reflects the dnsmasq agent state" {
+  run _agent_running; [ "$status" -ne 0 ]              # not running
+  export DEVIP_STUB_DNSMASQ_RUNNING=1
+  run _agent_running; [ "$status" -eq 0 ]              # running
+}

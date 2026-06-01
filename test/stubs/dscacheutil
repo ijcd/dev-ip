@@ -1,8 +1,20 @@
 #!/usr/bin/env bash
-# Fake dscacheutil: for `-q host -a name <fqdn>`, echo the IP the stub is told to.
+# Fake dscacheutil: for `-q host -a name <fqdn>`, echo an IP.
+# DEVIP_STUB_SYSRESOLVE_MATCHES mirrors the dig stub: look the label up in
+# hosts.d and echo whatever IP it actually got, so a provisioned probe
+# resolves consistently across dig (_resolves_dnsmasq) and dscacheutil
+# (_resolves_system). DEVIP_STUB_SYSRESOLVE (fixed IP) stays for callers that
+# don't care about matching a real allocation.
 printf 'dscacheutil %s\n' "$*" >> "${DEVIP_CALL_LOG:-/dev/null}"
 name=""
 for a in "$@"; do case "$a" in *.*) name="$a" ;; esac; done
-if [ -n "${DEVIP_STUB_SYSRESOLVE:-}" ]; then
+if [ -n "${DEVIP_STUB_SYSRESOLVE_MATCHES:-}" ]; then
+  tld="${DEVIP_TLD:-devip}"
+  label="${name%.$tld}"
+  f="${DEVIP_HOME:-$HOME/.local/share/dev-ip}/hosts.d/$label"
+  if [ -f "$f" ]; then
+    printf 'name: %s\nip_address: %s\n' "$name" "$(awk '{print $1}' "$f")"
+  fi
+elif [ -n "${DEVIP_STUB_SYSRESOLVE:-}" ]; then
   printf 'name: %s\nip_address: %s\n' "$name" "$DEVIP_STUB_SYSRESOLVE"
 fi

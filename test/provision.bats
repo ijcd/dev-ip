@@ -72,12 +72,34 @@ port 5354" ]
 
 @test "doctor resolves the probe end-to-end and leaves no probe behind" {
   export DEVIP_STUB_NIX_LOOPBACK=1
+  export DEVIP_STUB_ROUTE=ok DEVIP_STUB_PF_ENABLED=1 DEVIP_STUB_PF_LOADED=1
+  export DEVIP_STUB_SYSRESOLVE_MATCHES=1 DEVIP_STUB_DNSMASQ_RUNNING=1
   "$DEVIP" provision
   run "$DEVIP" doctor
   [ "$status" -eq 0 ]
-  [[ "$output" == *"resolve probe: OK"* ]]
-  [ ! -f "$DEVIP_HOME/hosts.d/probe" ]     # probe cleaned up
+  [[ "$output" == *"Resolution:"* ]]
+  [[ "$output" == *"dnsmasq"* ]]
+  [ ! -f "$DEVIP_HOME/hosts.d/doctor-probe" ]     # probe cleaned up (sanitized label)
   grep -q "dig" "$DEVIP_CALL_LOG"
+}
+
+@test "doctor: routing + resolution report, all green" {
+  export DEVIP_STUB_ROUTE=ok DEVIP_STUB_PF_ENABLED=1 DEVIP_STUB_PF_LOADED=1 DEVIP_STUB_SYSRESOLVE_MATCHES=1
+  export DEVIP_STUB_NIX_LOOPBACK=1 DEVIP_STUB_DNSMASQ_RUNNING=1
+  "$DEVIP" provision >/dev/null 2>&1 || true
+  run "$DEVIP" doctor
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Routing:"* ]]
+  [[ "$output" == *"Resolution:"* ]]
+  [[ "$output" == *"dnsmasq"* ]]
+}
+
+@test "doctor: a broken component makes an ✗ line and non-zero exit" {
+  export DEVIP_STUB_ROUTE=bind-fail
+  run "$DEVIP" doctor
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"loopback alias"* ]]
+  [[ "$output" == *"not on lo0"* ]]
 }
 
 @test "stock Mac: provision installs loopback daemon + pf anchor (steps 2,3)" {
@@ -187,10 +209,12 @@ port 5354" ]
   export DEVIP_STUB_LOOPBACK_PRESENT=1    # stub aliases 10-99 only
   export DEVIP_POOL_START=100 DEVIP_POOL_END=199   # not covered by the stub
   export DEVIP_STUB_DNSMASQ_RUNNING=1
+  export DEVIP_STUB_ROUTE=bind-fail       # probe IP (100-199) isn't aliased -> not on lo0
   "$DEVIP" provision >/dev/null 2>&1 || true
   run "$DEVIP" doctor
-  [[ "$output" == *"not fully aliased"* ]]
-  [[ "$output" == *"100-199"* ]]
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"loopback alias"* ]]
+  [[ "$output" == *"not on lo0"* ]]
 }
 
 @test "doctor does not warn when the pool is aliased" {
@@ -198,7 +222,9 @@ port 5354" ]
   export DEVIP_STUB_LOOPBACK_PRESENT=1    # stub aliases 10-99
   # default pool 10-99 IS covered by the stub
   export DEVIP_STUB_DNSMASQ_RUNNING=1
+  export DEVIP_STUB_ROUTE=ok DEVIP_STUB_PF_ENABLED=1 DEVIP_STUB_PF_LOADED=1 DEVIP_STUB_SYSRESOLVE_MATCHES=1
   "$DEVIP" provision >/dev/null 2>&1 || true
   run "$DEVIP" doctor
-  [[ "$output" != *"not fully aliased"* ]]
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"not on lo0"* ]]
 }
