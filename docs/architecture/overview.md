@@ -48,6 +48,15 @@ Per-IP, never `/24` (a subnet rule breaks cross-IP traffic). Loaded as a pf anch
 
 Steps 2-3 are the only sudo on a stock Mac; a nix-managed host skips them (detected in step 1), leaving step 6 (`/etc/resolver/devip`) as the sole sudo. `dev-ip deprovision` reverses only what dev-ip installed — never nix's resources.
 
+## Diagnostics
+
+`doctor` probes six components empirically — not file-presence, but behavior. Grouped into two chains:
+
+**Routing:** loopback IP alias (`ifconfig lo0`), alias reachability (native bind+connect probe).
+**Resolution:** `/etc/resolver/devip` file, dnsmasq agent running, resolve via dnsmasq (`:5354` dig probe), resolve via system resolver (dscacheutil probe).
+
+Each ✗ shows the exact fix (unified diff for owned files, command for actions). `doctor --fix` applies dev-ip-owned steps and re-probes. See ADR-0007.
+
 ## Cross-references
 
 - ADR-0001 — name sanitization (`sanitize_name`).
@@ -56,3 +65,4 @@ Steps 2-3 are the only sudo on a stock Mac; a nix-managed host skips them (detec
 - ADR-0004 — isolated dnsmasq / TLD choice (steps 4-6 above, and the data-flow diagram at the top of this doc).
 - ADR-0005 — configurable pool range (default `127.0.0.10-99`, see `DEVIP_POOL_START`/`DEVIP_POOL_END`).
 - ADR-0006 — kernel advisory lock via `perl` `flock` for concurrent `alloc` (supersedes ADR-0002).
+- ADR-0007 — `doctor` diagnoses per-component routing/resolution status and applies owned fixes.

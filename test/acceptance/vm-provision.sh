@@ -8,7 +8,8 @@ echo "== 1. clean provision =="
 sudo "$DEVIP" provision
 
 echo "== 2. doctor (resolve probe) =="
-"$DEVIP" doctor
+"$DEVIP" doctor | tee /tmp/dev-ip-doctor.txt
+grep -q "all checks passed" /tmp/dev-ip-doctor.txt || { echo "FAIL: doctor checks failed"; exit 1; }
 
 echo "== 3. real routing: alloc + bind + curl the hairpin =="
 IP="$("$DEVIP" ip accept-test)"

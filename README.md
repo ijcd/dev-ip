@@ -46,7 +46,8 @@ dev-ip alloc <name>   # alias for `ip`
 dev-ip free <name>    # release <name>'s allocation
 dev-ip ls             # list allocations
 dev-ip provision      # converge host: resolver + dnsmasq (+ loopback/pf on a stock Mac)
-dev-ip doctor         # provision --check + an end-to-end resolve probe
+dev-ip doctor         # diagnose routing/resolution status per component + show exact fixes
+dev-ip doctor --fix   # apply the fixes dev-ip owns (defers nix-owned loopback/pf)
 dev-ip deprovision    # remove dev-ip's host changes
 ```
 
@@ -59,6 +60,10 @@ LB_IP=$(dev-ip ip my-feature)
 docker compose -p my-feature up -d          # compose reads ${LB_IP:-127.0.0.1}
 # or: mix phx.server --ip "$LB_IP"
 ```
+
+### Diagnosing routing and resolution
+
+`doctor` probes six components (routing chain + resolution chain) and reports per-component status: alias presence and reachability on loopback, resolver file, dnsmasq agent, and resolution. For each failed check, `doctor` shows the exact fix — a unified diff for owned files, a command for actions. `doctor --fix` applies the dev-ip-owned fixes (skipping nix-managed loopback/PF). See ADR-0007.
 
 ## Configuration
 
