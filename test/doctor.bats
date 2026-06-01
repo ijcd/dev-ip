@@ -30,12 +30,6 @@ setup() {
   [ "$output" = "bind-fail" ]
 }
 
-@test "_resolver_ok true only when the file matches render_resolver" {
-  run _resolver_ok; [ "$status" -ne 0 ]                 # absent
-  mkdir -p "$DEVIP_RESOLVER_DIR"; render_resolver > "$DEVIP_RESOLVER_DIR/devip"
-  run _resolver_ok; [ "$status" -eq 0 ]                 # present + correct
-}
-
 @test "_pf_loaded true only when pf enabled AND anchor has rules" {
   run _pf_loaded; [ "$status" -ne 0 ]
   export DEVIP_STUB_PF_ENABLED=1 DEVIP_STUB_PF_LOADED=1

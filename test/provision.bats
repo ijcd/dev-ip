@@ -98,7 +98,7 @@ port 5354" ]
   export DEVIP_STUB_ROUTE=bind-fail
   run "$DEVIP" doctor
   [ "$status" -ne 0 ]
-  [[ "$output" == *"loopback alias"* ]]
+  [[ "$output" == *"reachability"* ]]
   [[ "$output" == *"not on lo0"* ]]
 }
 
@@ -213,7 +213,7 @@ port 5354" ]
   "$DEVIP" provision >/dev/null 2>&1 || true
   run "$DEVIP" doctor
   [ "$status" -ne 0 ]
-  [[ "$output" == *"loopback alias"* ]]
+  [[ "$output" == *"reachability"* ]]
   [[ "$output" == *"not on lo0"* ]]
 }
 
@@ -235,16 +235,19 @@ port 5354" ]
   [[ "$output" == *"+nameserver 127.0.0.1"* ]]
 }
 
-@test "doctor --fix applies the owned fix and re-probes" {
+@test "doctor --fix applies the owned fix" {
   export DEVIP_STUB_ROUTE=ok DEVIP_STUB_PF_ENABLED=1 DEVIP_STUB_PF_LOADED=1 DEVIP_STUB_NIX_LOOPBACK=1 DEVIP_STUB_DNSMASQ_RUNNING=1
   run "$DEVIP" doctor --fix
+  [ "$status" -eq 0 ]                     # owned-only fault, applied -> resolved
   [ -f "$DEVIP_RESOLVER_DIR/devip" ]      # step_resolver ran
   grep -q "tee" "$DEVIP_CALL_LOG"
+  [[ "$output" == *"applied"* ]]
 }
 
 @test "doctor --fix leaves nix-managed loopback/pf to nix (no daemon written)" {
   export DEVIP_STUB_ROUTE=bind-fail DEVIP_STUB_NIX_LOOPBACK=1 DEVIP_STUB_DNSMASQ_RUNNING=1
   run "$DEVIP" doctor --fix
+  [ "$status" -ne 0 ]                     # nix-owned fault left unresolved
   [ ! -f "$DEVIP_LAUNCHDAEMONS/dev-ip-loopback.plist" ]   # deferred to nix
   [[ "$output" == *"nix"* ]]
 }

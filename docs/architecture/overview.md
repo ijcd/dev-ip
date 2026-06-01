@@ -55,7 +55,7 @@ Steps 2-3 are the only sudo on a stock Mac; a nix-managed host skips them (detec
 **Routing:** loopback **reachability** (native bind+connect probe — proves alias + native reachability, not the hairpin), **pf hairpin loaded** (presence check; required for Docker/cross-IP).
 **Resolution:** dnsmasq **(:5354) answering** (dig probe; failure text distinguishes "agent not running" from "running but no answer"), **system resolver routes .devip** (dscacheutil probe — catches cases where dig passes but system DNS fails).
 
-Each ✗ shows the exact fix (unified diff for owned files — resolver, pf anchor, loopback daemon — or command for actions). `doctor --fix` applies dev-ip-owned steps and re-probes, deferring nix-managed resources. See ADR-0007.
+Each ✗ shows the exact fix (unified diff for owned files — resolver, pf anchor, loopback daemon — or command for actions). `doctor --fix` applies the dev-ip-owned fixes and reports anything it can't (nix-owned, connection issues). See ADR-0007.
 
 ## Cross-references
 

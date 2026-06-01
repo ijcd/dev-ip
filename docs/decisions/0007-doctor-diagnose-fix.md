@@ -6,7 +6,7 @@
 `doctor` was a thin `provision --check` + one resolve probe; it couldn't say which of the routing/resolution links was broken, and never verified routing behavior.
 
 ## Decision
-`doctor` probes each of six components (behavior, not file-presence), grouped routing vs resolution: a `perl` bind+connect routing probe, `dig`(:5354) and `dscacheutil` resolve probes, plus presence checks for the fix mapping. Each ✗ prints the exact fix (unified diff for owned files, command for actions). `doctor --fix` applies the dev-ip-owned, non-nix components via the existing idempotent `step_*` and re-probes.
+`doctor` probes four checks across two chains (behavior, not file-presence): a `perl` bind+connect routing probe, `dig`(:5354) and `dscacheutil` resolve probes, plus presence checks for the fix mapping. Each ✗ prints the exact fix (unified diff for owned files, command for actions). `doctor --fix` applies the dev-ip-owned fixes and reports anything it can't (nix-owned, connection issues).
 
 ## Alternatives considered
 - Fold into `provision --check` — that checks file presence, not behavior; misses "loaded ≠ enabled" and "resolver file present ≠ system routes it".

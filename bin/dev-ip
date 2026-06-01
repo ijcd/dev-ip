@@ -175,10 +175,6 @@ _pf_loaded() {   # pf enabled AND the dev-ip anchor has nat rules
   pfctl -s info 2>/dev/null | grep -q 'Status: Enabled' || return 1
   pfctl -a dev-ip -s nat 2>/dev/null | grep -q '^nat'
 }
-_resolver_ok() {
-  local f="$DEVIP_RESOLVER_DIR/devip"
-  [ -f "$f" ] && printf '%s\n' "$(render_resolver)" | cmp -s - "$f"
-}
 _agent_running() { launchctl print "gui/$(id -u)/dev-ip-dnsmasq" >/dev/null 2>&1; }
 
 step_verify() {   # step 8 — always live (even under doctor/--check)
@@ -244,31 +240,37 @@ _fix_diff() {   # FILE RENDERED  -> unified diff of on-disk (or empty) vs desire
 }
 
 # _fix_* COMPONENT: in fix mode (fix=1) apply via the step (respecting nix
-# ownership); else print the fix. Called only from a ✗ branch of do_doctor.
+# ownership) and return 0 (resolved); else print the fix and return 1
+# (unresolved — nothing gets applied in report mode). nix-managed components
+# stay unresolved even in fix mode. Called only from a ✗ branch of do_doctor.
 _fix_resolver() { local fix="$1"
-  if [ "$fix" -eq 1 ]; then step_resolver >/dev/null; return 0; fi
+  if [ "$fix" -eq 1 ]; then step_resolver >/dev/null; printf '      → applied\n'; return 0; fi
   _fix_diff "$DEVIP_RESOLVER_DIR/devip" "$(render_resolver)"
+  return 1
 }
 _fix_agent() { local fix="$1"
-  if [ "$fix" -eq 1 ]; then step_dnsmasq_agent >/dev/null; return 0; fi
+  if [ "$fix" -eq 1 ]; then step_dnsmasq_agent >/dev/null; printf '      → applied\n'; return 0; fi
   printf '      fix: install/reload dev-ip-dnsmasq LaunchAgent (:5354)\n'
+  return 1
 }
 _fix_loopback() { local fix="$1"
-  if [ "$MANAGED_BY_NIX" -eq 1 ]; then printf '      nix manages loopback — alias this range in your nix config\n'; return 0; fi
-  if [ "$fix" -eq 1 ]; then step_loopback >/dev/null; return 0; fi
+  if [ "$MANAGED_BY_NIX" -eq 1 ]; then printf '      nix manages loopback — alias this range in your nix config\n'; return 1; fi
+  if [ "$fix" -eq 1 ]; then step_loopback >/dev/null; printf '      → applied\n'; return 0; fi
   _fix_diff "$DEVIP_LAUNCHDAEMONS/dev-ip-loopback.plist" "$(render_loopback_plist)"
+  return 1
 }
 _fix_pf() { local fix="$1"
-  if [ "$MANAGED_BY_NIX" -eq 1 ]; then printf '      nix manages pf — hairpin owned by nix\n'; return 0; fi
-  if [ "$fix" -eq 1 ]; then step_pf >/dev/null; return 0; fi
+  if [ "$MANAGED_BY_NIX" -eq 1 ]; then printf '      nix manages pf — hairpin owned by nix\n'; return 1; fi
+  if [ "$fix" -eq 1 ]; then step_pf >/dev/null; printf '      → applied\n'; return 0; fi
   _fix_diff "$DEVIP_PF_ANCHOR_FILE" "$(render_pf_anchor)"
   printf '      then: sudo pfctl -f %s && sudo pfctl -e\n' "$DEVIP_PF_CONF"
+  return 1
 }
 
 do_doctor() {
   local fix=0; [ "${1:-}" = "--fix" ] && fix=1
   step_classify >/dev/null 2>&1
-  local tld="${DEVIP_TLD:-devip}" probe="__doctor_probe" label ip fqdn fails=0
+  local tld="${DEVIP_TLD:-devip}" probe="__doctor_probe" label ip fqdn fails=0 unresolved=0
   ip="$(alloc_ip "$probe")" || { echo "dev-ip: doctor probe alloc failed" >&2; return 1; }
   # alloc_ip/free_name sanitize the name into a DNS label internally (see
   # sanitize_name in lib/dev-ip-lib.sh) -- the hosts.d entry is keyed by that
@@ -277,26 +279,35 @@ do_doctor() {
   label="$(sanitize_name "$probe")"
   fqdn="$label.$tld"
 
+  # unresolved = ✗ components --fix did NOT resolve: nix-deferred, connect-fail,
+  # and (report mode only, since nothing gets applied) every ✗.
   printf 'Routing:\n'
   case "$(_probe_route "$ip")" in
     ok)           _ck ok "reachability ($ip) — alias up, natively reachable" ;;
-    bind-fail)    _ck fail "loopback alias" "$ip not on lo0"; fails=$((fails+1)); _fix_loopback "$fix" ;;
-    connect-fail) _ck fail "reachability" "$ip bound but connect blocked"; fails=$((fails+1)) ;;
+    bind-fail)    _ck fail "reachability" "$ip not on lo0"; fails=$((fails+1))
+                  _fix_loopback "$fix" || unresolved=$((unresolved+1)) ;;
+    connect-fail) _ck fail "reachability" "$ip bound but connect blocked"; fails=$((fails+1))
+                  printf '      something is blocking loopback connect — check a local firewall / pf ruleset\n'
+                  unresolved=$((unresolved+1)) ;;
   esac
   if _pf_loaded; then _ck ok "pf hairpin loaded (required for Docker/cross-IP)"
-  else _ck fail "pf hairpin" "anchor not loaded or pf disabled"; fails=$((fails+1)); _fix_pf "$fix"; fi
+  else _ck fail "pf hairpin" "anchor not loaded or pf disabled"; fails=$((fails+1))
+       _fix_pf "$fix" || unresolved=$((unresolved+1)); fi
 
   printf 'Resolution:\n'
   if _resolves_dnsmasq "$fqdn" "$ip"; then _ck ok "dnsmasq (:5354) answering"
-  elif _agent_running; then _ck fail "dnsmasq (:5354)" "agent running but no answer for $fqdn"; fails=$((fails+1)); _fix_agent "$fix"
-  else _ck fail "dnsmasq (:5354)" "agent not running"; fails=$((fails+1)); _fix_agent "$fix"; fi
+  elif _agent_running; then _ck fail "dnsmasq (:5354)" "agent running but no answer for $fqdn"; fails=$((fails+1))
+       _fix_agent "$fix" || unresolved=$((unresolved+1))
+  else _ck fail "dnsmasq (:5354)" "agent not running"; fails=$((fails+1))
+       _fix_agent "$fix" || unresolved=$((unresolved+1)); fi
   if _resolves_system "$fqdn" "$ip"; then _ck ok "system resolver routes .$tld"
-  else _ck fail "system resolver" ".$tld not routed to :5354"; fails=$((fails+1)); _fix_resolver "$fix"; fi
+  else _ck fail "system resolver" ".$tld not routed to :5354"; fails=$((fails+1))
+       _fix_resolver "$fix" || unresolved=$((unresolved+1)); fi
 
   free_name "$probe"
   if [ "$fails" -eq 0 ]; then printf 'all checks passed\n'
   elif [ "$fix" -eq 0 ]; then printf '→ run `dev-ip doctor --fix` to apply the fixes dev-ip owns\n'; fi
-  [ "$fails" -eq 0 ]
+  if [ "$fix" -eq 1 ]; then [ "$unresolved" -eq 0 ]; else [ "$fails" -eq 0 ]; fi
 }
 
 usage() {
