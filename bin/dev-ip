@@ -149,6 +149,38 @@ step_resolver() {   # step 6 (the one always-sudo bit)
   render_resolver | sudo tee "$file" >/dev/null
 }
 
+# --- doctor probes (behavior) ---------------------------------------------
+_probe_route() {   # IP -> ok | bind-fail | connect-fail
+  local ip="$1"
+  if [ -n "${DEVIP_STUB_ROUTE:-}" ]; then printf '%s\n' "$DEVIP_STUB_ROUTE"; return 0; fi
+  perl -MIO::Socket::INET -e '
+    my $ip = $ARGV[0];
+    my $s = IO::Socket::INET->new(LocalAddr=>$ip, LocalPort=>0, Listen=>1, Proto=>"tcp", ReuseAddr=>1);
+    unless ($s) { print "bind-fail\n"; exit 0 }
+    my $c = IO::Socket::INET->new(PeerAddr=>$ip, PeerPort=>$s->sockport, Proto=>"tcp", Timeout=>2);
+    print $c ? "ok\n" : "connect-fail\n";
+  ' "$ip" 2>/dev/null || printf 'bind-fail\n'
+}
+
+_resolves_dnsmasq() {   # FQDN IP -> 0 if dnsmasq(:5354) answers with IP
+  [ "$(dig +short @127.0.0.1 -p 5354 "$1" 2>/dev/null | head -1)" = "$2" ]
+}
+
+_resolves_system() {    # FQDN IP -> 0 if the system resolver answers with IP
+  dscacheutil -q host -a name "$1" 2>/dev/null | grep -q "ip_address: $2"
+}
+
+# --- doctor presence checks (which fix to show) ---------------------------
+_pf_loaded() {   # pf enabled AND the dev-ip anchor has nat rules
+  pfctl -s info 2>/dev/null | grep -q 'Status: Enabled' || return 1
+  pfctl -a dev-ip -s nat 2>/dev/null | grep -q '^nat'
+}
+_resolver_ok() {
+  local f="$DEVIP_RESOLVER_DIR/devip"
+  [ -f "$f" ] && printf '%s\n' "$(render_resolver)" | cmp -s - "$f"
+}
+_agent_running() { launchctl print "gui/$(id -u)/dev-ip-dnsmasq" >/dev/null 2>&1; }
+
 step_verify() {   # step 8 — always live (even under doctor/--check)
   local ip got
   ip="$(alloc_ip probe)"
@@ -247,4 +279,7 @@ main() {
   esac
 }
 
-main "$@"
+# run main only when executed, not when sourced (lets tests source the funcs)
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+  main "$@"
+fi

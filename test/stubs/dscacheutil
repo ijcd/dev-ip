@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Fake dscacheutil: for `-q host -a name <fqdn>`, echo the IP the stub is told to.
+printf 'dscacheutil %s\n' "$*" >> "${DEVIP_CALL_LOG:-/dev/null}"
+name=""
+for a in "$@"; do case "$a" in *.*) name="$a" ;; esac; done
+if [ -n "${DEVIP_STUB_SYSRESOLVE:-}" ]; then
+  printf 'name: %s\nip_address: %s\n' "$name" "$DEVIP_STUB_SYSRESOLVE"
+fi

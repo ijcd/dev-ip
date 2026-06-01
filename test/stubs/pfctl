@@ -6,4 +6,8 @@ case "$*" in
     [ -n "${DEVIP_STUB_NIX_PF:-}" ] && echo "nat on lo0 from 127.0.0.10 to 127.0.0.10 -> 127.0.0.1"
     ;;
 esac
+case "$*" in
+  "-s info")            [ -n "${DEVIP_STUB_PF_ENABLED:-}" ] && echo "Status: Enabled" || echo "Status: Disabled" ;;
+  "-a dev-ip -s nat")   [ -n "${DEVIP_STUB_PF_LOADED:-}" ] && echo "nat on lo0 from 127.0.0.10 to 127.0.0.10 -> 127.0.0.1" ;;
+esac
 exit 0
