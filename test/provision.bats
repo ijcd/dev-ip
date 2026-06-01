@@ -217,6 +217,29 @@ port 5354" ]
   [[ "$output" == *"not on lo0"* ]]
 }
 
+@test "doctor shows a diff-style fix for a missing resolver" {
+  export DEVIP_STUB_ROUTE=ok DEVIP_STUB_PF_ENABLED=1 DEVIP_STUB_PF_LOADED=1 DEVIP_STUB_NIX_LOOPBACK=1 DEVIP_STUB_DNSMASQ_RUNNING=1
+  # resolver absent -> system resolve fails -> fix shown
+  run "$DEVIP" doctor
+  [[ "$output" == *"$DEVIP_RESOLVER_DIR/devip"* ]]
+  [[ "$output" == *"+nameserver 127.0.0.1"* ]]
+  [[ "$output" == *"doctor --fix"* ]]
+}
+
+@test "doctor --fix applies the owned fix and re-probes" {
+  export DEVIP_STUB_ROUTE=ok DEVIP_STUB_PF_ENABLED=1 DEVIP_STUB_PF_LOADED=1 DEVIP_STUB_NIX_LOOPBACK=1 DEVIP_STUB_DNSMASQ_RUNNING=1
+  run "$DEVIP" doctor --fix
+  [ -f "$DEVIP_RESOLVER_DIR/devip" ]      # step_resolver ran
+  grep -q "tee" "$DEVIP_CALL_LOG"
+}
+
+@test "doctor --fix leaves nix-managed loopback/pf to nix (no daemon written)" {
+  export DEVIP_STUB_ROUTE=bind-fail DEVIP_STUB_NIX_LOOPBACK=1 DEVIP_STUB_DNSMASQ_RUNNING=1
+  run "$DEVIP" doctor --fix
+  [ ! -f "$DEVIP_LAUNCHDAEMONS/dev-ip-loopback.plist" ]   # deferred to nix
+  [[ "$output" == *"nix"* ]]
+}
+
 @test "doctor does not warn when the pool is aliased" {
   export DEVIP_STUB_NIX_LOOPBACK=1
   export DEVIP_STUB_LOOPBACK_PRESENT=1    # stub aliases 10-99

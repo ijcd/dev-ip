@@ -237,6 +237,33 @@ _ck() {   # _ck ok|fail LABEL [REASON]
   else printf '  ✗ %s — %s\n' "$2" "$3"; fi
 }
 
+_fix_diff() {   # LABEL FILE RENDERED  -> print a unified diff (current vs desired)
+  printf '      %s:\n' "$2"
+  diff -u "$1" <(printf '%s\n' "$3") 2>/dev/null | sed -n '3,$p' | sed 's/^/      /' || true
+}
+
+# _fix_* COMPONENT: in fix mode (fix=1) apply via the step (respecting nix
+# ownership); else print the fix. Called only from a ✗ branch of do_doctor.
+_fix_resolver() { local fix="$1"
+  if [ "$fix" -eq 1 ]; then step_resolver >/dev/null; return 0; fi
+  _fix_diff /dev/null "$DEVIP_RESOLVER_DIR/devip" "$(render_resolver)"
+}
+_fix_agent() { local fix="$1"
+  if [ "$fix" -eq 1 ]; then step_dnsmasq_agent >/dev/null; return 0; fi
+  printf '      fix: install/reload dev-ip-dnsmasq LaunchAgent (:5354)\n'
+}
+_fix_loopback() { local fix="$1"
+  if [ "$MANAGED_BY_NIX" -eq 1 ]; then printf '      nix manages loopback — alias this range in your nix config\n'; return 0; fi
+  if [ "$fix" -eq 1 ]; then step_loopback >/dev/null; return 0; fi
+  _fix_diff /dev/null "$DEVIP_LAUNCHDAEMONS/dev-ip-loopback.plist" "$(render_loopback_plist)"
+}
+_fix_pf() { local fix="$1"
+  if [ "$MANAGED_BY_NIX" -eq 1 ]; then printf '      nix manages pf — hairpin owned by nix\n'; return 0; fi
+  if [ "$fix" -eq 1 ]; then step_pf >/dev/null; return 0; fi
+  _fix_diff /dev/null "$DEVIP_PF_ANCHOR_FILE" "$(render_pf_anchor)"
+  printf '      then: sudo pfctl -f %s && sudo pfctl -e\n' "$DEVIP_PF_CONF"
+}
+
 do_doctor() {
   local fix=0; [ "${1:-}" = "--fix" ] && fix=1
   step_classify >/dev/null 2>&1
@@ -252,21 +279,22 @@ do_doctor() {
   printf 'Routing:\n'
   case "$(_probe_route "$ip")" in
     ok)           _ck ok "reachability ($ip) — alias up, natively reachable" ;;
-    bind-fail)    _ck fail "loopback alias" "$ip not on lo0"; fails=$((fails+1)) ;;
+    bind-fail)    _ck fail "loopback alias" "$ip not on lo0"; fails=$((fails+1)); _fix_loopback "$fix" ;;
     connect-fail) _ck fail "reachability" "$ip bound but connect blocked"; fails=$((fails+1)) ;;
   esac
   if _pf_loaded; then _ck ok "pf hairpin loaded (required for Docker/cross-IP)"
-  else _ck fail "pf hairpin" "anchor not loaded or pf disabled"; fails=$((fails+1)); fi
+  else _ck fail "pf hairpin" "anchor not loaded or pf disabled"; fails=$((fails+1)); _fix_pf "$fix"; fi
 
   printf 'Resolution:\n'
   if _resolves_dnsmasq "$fqdn" "$ip"; then _ck ok "dnsmasq (:5354) answering"
-  elif _agent_running; then _ck fail "dnsmasq (:5354)" "agent running but no answer for $fqdn"; fails=$((fails+1))
-  else _ck fail "dnsmasq (:5354)" "agent not running"; fails=$((fails+1)); fi
+  elif _agent_running; then _ck fail "dnsmasq (:5354)" "agent running but no answer for $fqdn"; fails=$((fails+1)); _fix_agent "$fix"
+  else _ck fail "dnsmasq (:5354)" "agent not running"; fails=$((fails+1)); _fix_agent "$fix"; fi
   if _resolves_system "$fqdn" "$ip"; then _ck ok "system resolver routes .$tld"
-  else _ck fail "system resolver" ".$tld not routed to :5354"; fails=$((fails+1)); fi
+  else _ck fail "system resolver" ".$tld not routed to :5354"; fails=$((fails+1)); _fix_resolver "$fix"; fi
 
   free_name "$probe"
-  [ "$fails" -eq 0 ] && printf 'all checks passed\n'
+  if [ "$fails" -eq 0 ]; then printf 'all checks passed\n'
+  elif [ "$fix" -eq 0 ]; then printf '→ run `dev-ip doctor --fix` to apply the fixes dev-ip owns\n'; fi
   [ "$fails" -eq 0 ]
 }
 
