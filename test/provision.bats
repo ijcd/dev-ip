@@ -263,3 +263,22 @@ port 5354" ]
   [ "$status" -eq 0 ]
   [[ "$output" != *"not on lo0"* ]]
 }
+
+@test "custom DEVIP_TLD: resolver file, verify + doctor probes, and deprovision all use it (not devip)" {
+  export DEVIP_TLD=lan
+  export DEVIP_STUB_NIX_LOOPBACK=1
+  "$DEVIP" provision >/dev/null 2>&1 || true   # step_verify may not resolve against the
+                                                # dig stub's fixed .devip parsing; only the
+                                                # wiring (file + probed name) is asserted here
+  [ -f "$DEVIP_RESOLVER_DIR/lan" ]
+  [ ! -f "$DEVIP_RESOLVER_DIR/devip" ]
+  grep -qF "probe.lan" "$DEVIP_CALL_LOG"       # step_verify probed the configured TLD
+
+  : > "$DEVIP_CALL_LOG"
+  "$DEVIP" doctor >/dev/null 2>&1 || true
+  grep -qF "doctor-probe.lan" "$DEVIP_CALL_LOG"  # doctor's dnsmasq probe also uses .lan
+
+  run "$DEVIP" deprovision
+  [ "$status" -eq 0 ]
+  [ ! -f "$DEVIP_RESOLVER_DIR/lan" ]
+}

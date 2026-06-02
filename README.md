@@ -72,7 +72,7 @@ All via environment variables:
 | Var | Default | Purpose |
 |---|---|---|
 | `DEVIP_POOL_START` / `DEVIP_POOL_END` | `10` / `99` | IP pool range (last octet in `127.0.0.x`, `2`–`254`). Set a non-overlapping range to coexist with another allocator. |
-| `DEVIP_TLD` | `devip` | the TLD served (`--tld` on `provision` for multiple). |
+| `DEVIP_TLD` | `devip` | the single TLD served; routed to `/etc/resolver/<tld>`. |
 | `DEVIP_HOME` | `~/.local/share/dev-ip` | registry location. |
 
 Provisioning paths (`DEVIP_RESOLVER_DIR`, `DEVIP_LAUNCHAGENTS`, `DEVIP_LAUNCHDAEMONS`, `DEVIP_PF_CONF`, `DEVIP_PF_ANCHOR_FILE`) are also overridable — the test suite redirects them to a temp dir.
@@ -84,7 +84,7 @@ If a nix-darwin (or similar) setup already aliases the loopback pool and manages
 ## Testing
 
 ```sh
-bats test/            # ~72 tests; no root, no VM
+bats test/            # 87 tests; no root, no VM
 bats test/render.bats # one file
 ```
 

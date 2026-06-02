@@ -135,7 +135,7 @@ step_hostsd() {     # step 7
 }
 
 step_resolver() {   # step 6 (the one always-sudo bit)
-  local dir="$DEVIP_RESOLVER_DIR" file="$DEVIP_RESOLVER_DIR/devip"
+  local dir="$DEVIP_RESOLVER_DIR" file="$DEVIP_RESOLVER_DIR/${DEVIP_TLD:-devip}"
   if [ -f "$file" ] && printf '%s\n' "$(render_resolver)" | cmp -s - "$file"; then
     printf 'resolver: %s up to date\n' "$file"
     return 0
@@ -178,15 +178,16 @@ _pf_loaded() {   # pf enabled AND the dev-ip anchor has nat rules
 _agent_running() { launchctl print "gui/$(id -u)/dev-ip-dnsmasq" >/dev/null 2>&1; }
 
 step_verify() {   # step 8 — always live (even under doctor/--check)
-  local ip got
+  local ip got fqdn
+  fqdn="$(sanitize_name probe).${DEVIP_TLD:-devip}"
   ip="$(alloc_ip probe)"
-  got="$(dig +short @127.0.0.1 -p 5354 probe.devip 2>/dev/null | head -1)"
+  got="$(dig +short @127.0.0.1 -p 5354 "$fqdn" 2>/dev/null | head -1)"
   free_name probe
   if [ "$got" = "$ip" ]; then
-    printf 'resolve probe: OK (probe.devip -> %s)\n' "$ip"
+    printf 'resolve probe: OK (%s -> %s)\n' "$fqdn" "$ip"
     return 0
   fi
-  printf 'resolve probe: FAIL (probe.devip -> %s, expected %s)\n' "${got:-<none>}" "$ip" >&2
+  printf 'resolve probe: FAIL (%s -> %s, expected %s)\n' "$fqdn" "${got:-<none>}" "$ip" >&2
   return 1
 }
 
@@ -210,7 +211,7 @@ do_deprovision() {
   rm -f "$agent"
 
   # resolver (sudo)
-  [ -f "$DEVIP_RESOLVER_DIR/devip" ] && sudo rm -f "$DEVIP_RESOLVER_DIR/devip"
+  [ -f "$DEVIP_RESOLVER_DIR/${DEVIP_TLD:-devip}" ] && sudo rm -f "$DEVIP_RESOLVER_DIR/${DEVIP_TLD:-devip}"
 
   # pf anchor — only what dev-ip added (its include line + anchor file)
   if grep -qE '^(nat-anchor|load anchor) "dev-ip"' "$DEVIP_PF_CONF" 2>/dev/null; then
@@ -245,7 +246,7 @@ _fix_diff() {   # FILE RENDERED  -> unified diff of on-disk (or empty) vs desire
 # stay unresolved even in fix mode. Called only from a ✗ branch of do_doctor.
 _fix_resolver() { local fix="$1"
   if [ "$fix" -eq 1 ]; then step_resolver >/dev/null; printf '      → applied\n'; return 0; fi
-  _fix_diff "$DEVIP_RESOLVER_DIR/devip" "$(render_resolver)"
+  _fix_diff "$DEVIP_RESOLVER_DIR/${DEVIP_TLD:-devip}" "$(render_resolver)"
   return 1
 }
 _fix_agent() { local fix="$1"
