@@ -27,7 +27,7 @@ Per-IP, never `/24` (a subnet rule breaks cross-IP traffic). Loaded as a pf anch
 
 ## Functional core / imperative shell
 
-`lib/dev-ip-lib.sh` is the functional core — pure functions, no IO beyond reading/writing the `hosts.d` registry itself: `sanitize_name`, `next_free_ip`, `alloc_ip`/`_alloc_new`, `free_name`, `list_allocations`, and the `render_*` functions that produce plist/resolver/pf-anchor content as strings.
+`lib/dev-ip-lib.sh` is pure renderers + allocation logic + a registry adapter, not a pure core end to end: `sanitize_name`, `next_free_ip`, and the `render_*` functions (plist/resolver/pf-anchor content) are pure, no IO. `used_ips`, `alloc_ip`/`_alloc_new`, `free_name`, and `list_allocations` are the registry adapter — they read/write the `hosts.d` files, and `_with_lock` does the one IO the CLI delegates to the lib (`exec`-ing a perl `flock`, see ADR-0006). The lib owns this because the registry is the one piece of persistence state pure allocation logic can't be computed without touching.
 
 `bin/dev-ip` is the imperative shell — sources the lib, adds host-layer seams (`DEVIP_RESOLVER_DIR`, `DEVIP_LAUNCHAGENTS`, `DEVIP_LAUNCHDAEMONS`, `DEVIP_PF_CONF`, `DEVIP_PF_ANCHOR_FILE`, overridable in tests), and performs all mutation: `launchctl`, `pfctl`, `sudo tee`, file writes gated by detect-then-mutate checks.
 

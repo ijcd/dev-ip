@@ -6,7 +6,7 @@
 The IP pool (`127.0.0.10-99`) must exist as `lo0` aliases, persisted across reboot, on a stock (non-nix) Mac. `ifconfig lo0 alias` requires root.
 
 ## Decision
-Install `/Library/LaunchDaemons/dev-ip-loopback.plist` (root domain, `RunAtLoad`) — `render_loopback_plist` (`lib/dev-ip-lib.sh:143-160`), `step_loopback` (`bin/dev-ip:49-66`). Skipped entirely when step 1 (`step_classify`, `bin/dev-ip:32-39`) detects a nix-managed host via `launchctl print system/com.local.loopback-aliases`.
+Install `/Library/LaunchDaemons/dev-ip-loopback.plist` (root domain, `RunAtLoad`) — `render_loopback_plist` in `lib/dev-ip-lib.sh`, `step_loopback` in `bin/dev-ip`. Skipped entirely when step 1 (`step_classify` in `bin/dev-ip`) detects a nix-managed host via `launchctl print system/com.local.loopback-aliases`.
 
 ## Alternatives considered
 - User LaunchAgent — runs in the user domain, can't run `ifconfig lo0 alias` (needs root).

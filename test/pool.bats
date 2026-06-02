@@ -62,3 +62,12 @@ setup() {
   [ "$status" -ne 0 ]
   [[ "$output" == *"127.0.0.100-101 exhausted"* ]]
 }
+
+@test "next_free_ip with used IPs returns one in-pool and not in the used set" {
+  run next_free_ip 127.0.0.10 127.0.0.12
+  [ "$status" -eq 0 ]
+  local o="${output##*.}"
+  [ "$o" -ge 10 ] && [ "$o" -le 99 ]
+  [ "$output" != "127.0.0.10" ]
+  [ "$output" != "127.0.0.12" ]
+}
