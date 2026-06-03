@@ -34,6 +34,12 @@ Full detail: [`docs/architecture/overview.md`](docs/architecture/overview.md); d
 ## Install
 
 ```sh
+brew install ijcd/tap/dev-ip
+```
+
+Or from source:
+
+```sh
 git clone https://github.com/ijcd/dev-ip ~/src/dev-ip
 ln -s ~/src/dev-ip/bin/dev-ip /usr/local/bin/dev-ip   # or add bin/ to PATH
 ```
