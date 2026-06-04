@@ -73,7 +73,17 @@ docker compose -p my-feature up -d          # compose reads ${LB_IP:-127.0.0.1}
 
 ## Configuration
 
-All via environment variables:
+Config resolves **env var > `config.toml` > default**. The file lives at
+`${XDG_CONFIG_HOME:-~/.config}/dev-ip/config.toml` (override `DEVIP_CONFIG`).
+
+    dev-ip config              # effective values + where each came from
+    dev-ip config get tld
+    dev-ip config set pool_start 100
+    dev-ip config edit         # opens $EDITOR, seeded with a commented template
+
+TOML keys map to env vars by name: `pool_start` ↔ `DEVIP_POOL_START`. dev-ip
+reads a **flat subset** of TOML (top-level `key = value`, `#` comments) — not
+nested tables.
 
 | Var | Default | Purpose |
 |---|---|---|
@@ -90,7 +100,7 @@ If a nix-darwin (or similar) setup already aliases the loopback pool and manages
 ## Testing
 
 ```sh
-bats test/            # 87 tests; no root, no VM
+bats test/            # 100 tests; no root, no VM
 bats test/render.bats # one file
 ```
 

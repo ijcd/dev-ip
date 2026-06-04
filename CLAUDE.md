@@ -16,13 +16,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```sh
-bats test/                 # run all tests (87 tests; bats-core; brew install bats-core)
+bats test/                 # run all tests (100 tests; bats-core; brew install bats-core)
 bats test/registry.bats    # run one file
 bin/dev-ip ip <name>       # allocate + print loopback IP (works now, no sudo)
 bin/dev-ip ls              # list allocations
 bin/dev-ip provision       # converge host resolver/loopback/pf/dnsmasq (sudo: resolver step)
 bin/dev-ip doctor          # per-component routing/resolution report; --fix applies owned fixes
 bin/dev-ip deprovision     # remove dev-ip's host changes
+bin/dev-ip config          # show / get / set / edit configuration
 ```
 
 `provision` / `doctor` / `deprovision` are fully implemented (`do_provision`, `do_doctor`, `do_deprovision` in `bin/dev-ip`): `do_provision` runs 8 detect-then-mutate `step_*` functions, `do_doctor` probes each routing/resolution component (a live bind+connect reachability probe, `dig`/`dscacheutil` resolve probes, pf presence) and prints the exact fix per failure — `doctor --fix` applies the dev-ip-owned ones. `do_deprovision` reverses only dev-ip's own host changes. Not yet verified: layer-3 acceptance on a real macOS VM — see README "Known limitations".

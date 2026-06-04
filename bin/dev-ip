@@ -8,6 +8,8 @@ DEVIP_LIB="${DEVIP_LIB:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)/dev
 # shellcheck source=../lib/dev-ip-lib.sh
 source "$DEVIP_LIB"
 
+load_config   # populate DEVIP_* from the config file (env still wins)
+
 # --- host-layer seams (paths overridable in tests) -------------------------
 : "${DEVIP_RESOLVER_DIR:=/etc/resolver}"
 : "${DEVIP_LAUNCHAGENTS:=$HOME/Library/LaunchAgents}"
@@ -229,6 +231,74 @@ do_deprovision() {
   printf 'deprovision: dev-ip host changes removed\n'
 }
 
+_config_src() {   # KEY -> env|config|default from DEVIP_CONFIG_SOURCES
+  case " $DEVIP_CONFIG_SOURCES " in
+    *" $1=env "*)    printf 'env\n' ;;
+    *" $1=config "*) printf 'config\n' ;;
+    *)               printf 'default\n' ;;
+  esac
+}
+
+_config_show() {
+  local cfg; cfg="$(_config_path)"
+  local key env def desc val
+  while IFS='|' read -r key env def desc; do
+    [ -n "$key" ] || continue
+    val="$(printenv "$env" 2>/dev/null || printf '%s' "$def")"
+    printf '%-16s = %-28s (%s)\n' "$key" "$val" "$(_config_src "$key")"
+  done <<EOF
+$(_config_keys)
+EOF
+  # warn on unknown keys in the file
+  if [ -f "$cfg" ]; then
+    local k
+    for k in $(parse_config "$cfg" | sed 's/=.*//'); do
+      _config_known_key "$k" || printf 'warning: unknown config key in %s: %s\n' "$cfg" "$k" >&2
+    done
+    printf 'config: %s (exists)\n' "$cfg"
+  else
+    printf 'config: %s (not created)\n' "$cfg"
+  fi
+}
+
+do_config() {
+  local sub="${1:-}"; [ "$#" -gt 0 ] && shift
+  case "$sub" in
+    "")   _config_show ;;
+    get)  _config_get "${1:?dev-ip: config get: key required}" ;;
+    set)  _config_set "${1:?dev-ip: config set: key required}" "${2:?dev-ip: config set: value required}" ;;
+    edit) _config_edit ;;
+    *)    echo "dev-ip: unknown config subcommand: $sub" >&2; return 2 ;;
+  esac
+}
+
+_config_get() {
+  local key="$1" k env def desc
+  _config_known_key "$key" || { echo "dev-ip: unknown config key: $key" >&2; return 1; }
+  while IFS='|' read -r k env def desc; do
+    if [ "$k" = "$key" ]; then printenv "$env" 2>/dev/null || printf '%s\n' "$def"; return 0; fi
+  done <<EOF
+$(_config_keys)
+EOF
+}
+
+_config_set() {
+  local key="$1" val="$2" cfg
+  _config_validate "$key" "$val" || return 1
+  cfg="$(_config_path)"
+  mkdir -p "$(dirname "$cfg")"
+  { cat "$cfg" 2>/dev/null || true; } | render_config_upsert "$key" "$val" > "$cfg.tmp" && mv "$cfg.tmp" "$cfg"
+}
+
+_config_edit() {
+  local cfg; cfg="$(_config_path)"
+  if [ ! -s "$cfg" ]; then
+    mkdir -p "$(dirname "$cfg")"
+    render_config_template > "$cfg"
+  fi
+  exec "${EDITOR:-vi}" "$cfg"
+}
+
 _ck() {   # _ck ok|fail LABEL [REASON]
   if [ "$1" = ok ]; then printf '  ✓ %s\n' "$2"
   else printf '  ✗ %s — %s\n' "$2" "$3"; fi
@@ -322,6 +392,10 @@ usage: dev-ip <command> [args]
   provision      converge host resolver/loopback/pf/dnsmasq   (sudo: resolver)
   doctor         provision --check + an end-to-end resolve probe
   deprovision    remove dev-ip's host changes
+  config                print effective config + source per key
+  config get <key>      print one resolved value
+  config set <key> <v>  set a value in the config file
+  config edit           open the config file in $EDITOR (seeded if empty)
 EOF
 }
 
@@ -340,6 +414,7 @@ main() {
       do_provision ;;
     doctor)      do_doctor "$@" ;;
     deprovision) do_deprovision ;;
+    config)      do_config "$@" ;;
     -h | --help) usage; return 0 ;;
     "")          usage; return 2 ;;
     *)           echo "dev-ip: unknown command: $cmd" >&2; usage; return 2 ;;

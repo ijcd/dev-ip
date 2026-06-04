@@ -187,3 +187,126 @@ render_loopback_plist() {
 </plist>
 EOF
 }
+
+# _config_keys -> one "key|env|default|description" line per config setting.
+# Single source of truth (bash 3.2 has no assoc arrays). $HOME expands here.
+_config_keys() {
+  cat <<EOF
+pool_start|DEVIP_POOL_START|10|IP pool range start (last octet, 2-254)
+pool_end|DEVIP_POOL_END|99|IP pool range end (last octet, 2-254)
+tld|DEVIP_TLD|devip|resolver TLD served by dnsmasq
+home|DEVIP_HOME|$HOME/.local/share/dev-ip|registry (hosts.d) location
+loopback_owner|DEVIP_LOOPBACK_OWNER|auto|who aliases lo0 (auto/nix/dev-ip, phase 2)
+pf_owner|DEVIP_PF_OWNER|auto|who owns pf hairpin (auto/nix/dev-ip, phase 2)
+resolver_dir|DEVIP_RESOLVER_DIR|/etc/resolver|/etc/resolver dir
+launchagents|DEVIP_LAUNCHAGENTS|$HOME/Library/LaunchAgents|user LaunchAgents dir
+launchdaemons|DEVIP_LAUNCHDAEMONS|/Library/LaunchDaemons|root LaunchDaemons dir
+pf_conf|DEVIP_PF_CONF|/etc/pf.conf|pf.conf path
+pf_anchor_file|DEVIP_PF_ANCHOR_FILE|/etc/pf.anchors/dev-ip|pf anchor file path
+EOF
+}
+
+# _config_known_key KEY -> 0 if KEY is a registry key.
+_config_known_key() {
+  local k rest
+  while IFS='|' read -r k rest; do [ "$k" = "$1" ] && return 0; done <<EOF
+$(_config_keys)
+EOF
+  return 1
+}
+
+# parse_config FILE -> "key=value" lines for the flat TOML subset.
+# blank / #-comment lines skipped; needs '='; trims ws; strips one "" layer.
+parse_config() {
+  local file="$1" line key val
+  [ -f "$file" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    # skip blank and (possibly indented) full-line comments
+    local trimmed="${line#"${line%%[![:space:]]*}"}"
+    case "$trimmed" in ''|\#*) continue ;; esac
+    case "$line" in *=*) ;; *) continue ;; esac
+    key="${line%%=*}"; val="${line#*=}"
+    key="$(printf '%s' "$key" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+    val="$(printf '%s' "$val" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+    case "$val" in \"*\") val="${val#\"}"; val="${val%\"}" ;; esac
+    [ -n "$key" ] && printf '%s=%s\n' "$key" "$val"
+  done < "$file"
+}
+
+# _config_path -> the resolved config file path (single source of truth).
+_config_path() {
+  printf '%s\n' "${DEVIP_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/dev-ip/config.toml}"
+}
+
+# load_config -> populate DEVIP_* from the config file (export-if-unset), env
+# wins. Records DEVIP_CONFIG_SOURCES="key=env|config|default ...". Idempotent.
+load_config() {
+  [ -n "${DEVIP_CONFIG_SOURCES:-}" ] && return 0
+  local cfg; cfg="$(_config_path)"
+  local parsed="" srcs="" key env def desc fileval
+  [ -f "$cfg" ] && parsed="$(parse_config "$cfg")"
+  while IFS='|' read -r key env def desc; do
+    [ -n "$key" ] || continue
+    if printenv "$env" >/dev/null 2>&1; then
+      srcs="${srcs}${key}=env "
+    elif printf '%s\n' "$parsed" | grep -q "^${key}="; then
+      fileval="$(printf '%s\n' "$parsed" | sed -n "s/^${key}=//p" | head -1)"
+      export "$env=$fileval"
+      srcs="${srcs}${key}=config "
+    else
+      srcs="${srcs}${key}=default "
+    fi
+  done <<EOF
+$(_config_keys)
+EOF
+  export DEVIP_CONFIG_SOURCES="$srcs"
+}
+
+# _config_validate KEY VALUE -> 0 if valid; stderr + 1 otherwise (also the
+# unknown-key gate). Simple checks only.
+_config_validate() {
+  local key="$1" val="$2"
+  case "$key" in
+    pool_start|pool_end)
+      case "$val" in ''|*[!0-9]*) echo "dev-ip: $key must be an integer 2-254" >&2; return 1 ;; esac
+      { [ "$val" -ge 2 ] && [ "$val" -le 254 ]; } || { echo "dev-ip: $key must be 2-254" >&2; return 1; } ;;
+    loopback_owner|pf_owner)
+      case "$val" in auto|nix|dev-ip) ;; *) echo "dev-ip: $key must be auto|nix|dev-ip" >&2; return 1 ;; esac ;;
+    tld)
+      case "$val" in ''|*[!a-z0-9-]*) echo "dev-ip: $key must be DNS-label chars [a-z0-9-]" >&2; return 1 ;; esac ;;
+    home|resolver_dir|launchagents|launchdaemons|pf_conf|pf_anchor_file)
+      [ -n "$val" ] || { echo "dev-ip: $key must be non-empty" >&2; return 1; } ;;
+    *) echo "dev-ip: unknown config key: $key" >&2; return 1 ;;
+  esac
+}
+
+# render_config_upsert KEY VALUE -> stdin config text to stdout with KEY set.
+render_config_upsert() {
+  local key="$1" val="$2" replaced=0 line first
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      \#*) printf '%s\n' "$line"; continue ;;
+    esac
+    first="$(printf '%s' "${line%%=*}" | sed -E 's/[[:space:]]//g')"
+    if [ "$first" = "$key" ] && case "$line" in *=*) true ;; *) false ;; esac; then
+      printf '%s = %s\n' "$key" "$val"; replaced=1
+    else
+      printf '%s\n' "$line"
+    fi
+  done
+  [ "$replaced" -eq 0 ] && printf '%s = %s\n' "$key" "$val"
+  return 0
+}
+
+# render_config_template -> commented starter config from the key registry.
+render_config_template() {
+  local key env def desc
+  printf '# dev-ip config — flat TOML subset. Uncomment + edit a line to set it.\n'
+  printf '# Env vars (DEVIP_*) override anything here.\n\n'
+  while IFS='|' read -r key env def desc; do
+    [ -n "$key" ] || continue
+    printf '# %s\n# %s = %s\n\n' "$desc" "$key" "$def"
+  done <<EOF
+$(_config_keys)
+EOF
+}

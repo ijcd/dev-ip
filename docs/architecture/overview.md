@@ -29,7 +29,7 @@ Per-IP, never `/24` (a subnet rule breaks cross-IP traffic). Loaded as a pf anch
 
 `lib/dev-ip-lib.sh` is pure renderers + allocation logic + a registry adapter, not a pure core end to end: `sanitize_name`, `next_free_ip`, and the `render_*` functions (plist/resolver/pf-anchor content) are pure, no IO. `used_ips`, `alloc_ip`/`_alloc_new`, `free_name`, and `list_allocations` are the registry adapter — they read/write the `hosts.d` files, and `_with_lock` does the one IO the CLI delegates to the lib (`exec`-ing a perl `flock`, see ADR-0006). The lib owns this because the registry is the one piece of persistence state pure allocation logic can't be computed without touching.
 
-`bin/dev-ip` is the imperative shell — sources the lib, adds host-layer seams (`DEVIP_RESOLVER_DIR`, `DEVIP_LAUNCHAGENTS`, `DEVIP_LAUNCHDAEMONS`, `DEVIP_PF_CONF`, `DEVIP_PF_ANCHOR_FILE`, overridable in tests), and performs all mutation: `launchctl`, `pfctl`, `sudo tee`, file writes gated by detect-then-mutate checks.
+`bin/dev-ip` is the imperative shell — sources the lib, calls `load_config` to populate `DEVIP_*` from `config.toml` where env is unset (see ADR-0008), adds host-layer seams (`DEVIP_RESOLVER_DIR`, `DEVIP_LAUNCHAGENTS`, `DEVIP_LAUNCHDAEMONS`, `DEVIP_PF_CONF`, `DEVIP_PF_ANCHOR_FILE`, overridable in tests), and performs all mutation: `launchctl`, `pfctl`, `sudo tee`, file writes gated by detect-then-mutate checks.
 
 ## Provision pipeline (8 steps)
 
@@ -66,3 +66,4 @@ Each ✗ shows the exact fix (unified diff for owned files — resolver, pf anch
 - ADR-0005 — configurable pool range (default `127.0.0.10-99`, see `DEVIP_POOL_START`/`DEVIP_POOL_END`).
 - ADR-0006 — kernel advisory lock via `perl` `flock` for concurrent `alloc` (supersedes ADR-0002).
 - ADR-0007 — `doctor` diagnoses per-component routing/resolution status and applies owned fixes.
+- ADR-0008 — TOML config file with env override + `config` command.
