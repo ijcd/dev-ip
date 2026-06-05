@@ -23,8 +23,6 @@ values + provenance; `get`/`set` (validated, hard error on unknown key)/`edit`.
   and map 1:1 to env vars. Deferred.
 
 ## Consequences
-`loopback_owner`/`pf_owner` keys exist but are inert in phase 1 (default `auto`
-= today's `step_classify`). Making them change provisioning — and superseding
-ADR-0005's blanket "no dev-ip aliasing on a nix host" — is phase 2 (its own
-ADR). See `docs/architecture/overview.md` for where config load sits in the
-pipeline.
+`loopback_owner`/`pf_owner` keys are now functional (ADR-0009): default `dev-ip`
+(self-manage), values `dev-ip | system` (defer). See `docs/architecture/overview.md`
+for where config load sits in the pipeline.

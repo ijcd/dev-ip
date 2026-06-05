@@ -196,8 +196,8 @@ pool_start|DEVIP_POOL_START|10|IP pool range start (last octet, 2-254)
 pool_end|DEVIP_POOL_END|99|IP pool range end (last octet, 2-254)
 tld|DEVIP_TLD|devip|resolver TLD served by dnsmasq
 home|DEVIP_HOME|$HOME/.local/share/dev-ip|registry (hosts.d) location
-loopback_owner|DEVIP_LOOPBACK_OWNER|auto|who aliases lo0 (auto/nix/dev-ip, phase 2)
-pf_owner|DEVIP_PF_OWNER|auto|who owns pf hairpin (auto/nix/dev-ip, phase 2)
+loopback_owner|DEVIP_LOOPBACK_OWNER|dev-ip|who manages lo0 aliases (dev-ip/system)
+pf_owner|DEVIP_PF_OWNER|dev-ip|who manages pf hairpin (dev-ip/system)
 resolver_dir|DEVIP_RESOLVER_DIR|/etc/resolver|/etc/resolver dir
 launchagents|DEVIP_LAUNCHAGENTS|$HOME/Library/LaunchAgents|user LaunchAgents dir
 launchdaemons|DEVIP_LAUNCHDAEMONS|/Library/LaunchDaemons|root LaunchDaemons dir
@@ -271,7 +271,7 @@ _config_validate() {
       case "$val" in ''|*[!0-9]*) echo "dev-ip: $key must be an integer 2-254" >&2; return 1 ;; esac
       { [ "$val" -ge 2 ] && [ "$val" -le 254 ]; } || { echo "dev-ip: $key must be 2-254" >&2; return 1; } ;;
     loopback_owner|pf_owner)
-      case "$val" in auto|nix|dev-ip) ;; *) echo "dev-ip: $key must be auto|nix|dev-ip" >&2; return 1 ;; esac ;;
+      case "$val" in dev-ip|system) ;; *) echo "dev-ip: $key must be dev-ip|system" >&2; return 1 ;; esac ;;
     tld)
       case "$val" in ''|*[!a-z0-9-]*) echo "dev-ip: $key must be DNS-label chars [a-z0-9-]" >&2; return 1 ;; esac ;;
     home|resolver_dir|launchagents|launchdaemons|pf_conf|pf_anchor_file)
@@ -309,4 +309,14 @@ render_config_template() {
   done <<EOF
 $(_config_keys)
 EOF
+}
+
+# _resolve_owner VALUE -> dev-ip | system. Only the literal 'system' defers;
+# empty, 'dev-ip', legacy 'auto'/'nix', or anything else -> dev-ip (self-manage,
+# the safe default). No host detection.
+_resolve_owner() {
+  case "$1" in
+    system) printf 'system\n' ;;
+    *)      printf 'dev-ip\n' ;;
+  esac
 }

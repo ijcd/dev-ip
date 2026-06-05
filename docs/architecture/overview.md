@@ -31,22 +31,21 @@ Per-IP, never `/24` (a subnet rule breaks cross-IP traffic). Loaded as a pf anch
 
 `bin/dev-ip` is the imperative shell — sources the lib, calls `load_config` to populate `DEVIP_*` from `config.toml` where env is unset (see ADR-0008), adds host-layer seams (`DEVIP_RESOLVER_DIR`, `DEVIP_LAUNCHAGENTS`, `DEVIP_LAUNCHDAEMONS`, `DEVIP_PF_CONF`, `DEVIP_PF_ANCHOR_FILE`, overridable in tests), and performs all mutation: `launchctl`, `pfctl`, `sudo tee`, file writes gated by detect-then-mutate checks.
 
-## Provision pipeline (8 steps)
+## Provision pipeline (7 steps)
 
 `dev-ip provision` runs each step as detect-then-maybe-mutate; `--check` prints intent and mutates nothing; `doctor` = `--check` + a live resolve probe.
 
 | # | Step | Detect (skip if true) | Mutate | Sudo |
 |---|------|------------------------|--------|------|
-| 1 | classify host | — | set `MANAGED_BY_NIX=1` if `launchctl print system/com.local.loopback-aliases` exists | no |
-| 2 | loopback aliases | nix-managed, or all pool IPs already on `lo0` | install `/Library/LaunchDaemons/dev-ip-loopback.plist` (ADR-0003) | yes |
-| 3 | PF hairpin | nix anchor present (`pfctl -a loopback_dev -s nat`) | write `/etc/pf.anchors/dev-ip`, append `/etc/pf.conf` include if absent, `pfctl -f` + `-e` | yes |
-| 4 | dnsmasq binary | `command -v dnsmasq` | report + instruct; no auto-install without `--yes` | no |
-| 5 | dnsmasq agent | plist current and `launchctl print gui/$UID/dev-ip-dnsmasq` running | write `dev-ip-dnsmasq.plist`, bootout+bootstrap (ADR-0004) | no |
-| 6 | resolver | `/etc/resolver/devip` byte-equal to desired | write it (ADR-0004) | yes |
-| 7 | hosts.d | dir exists | `mkdir -p` | no |
-| 8 | verify | — | write probe, `dig` it, `rm` — fail loudly on mismatch | no |
+| 1 | loopback aliases | `loopback_owner = system`, or all pool IPs already on `lo0` | install `/Library/LaunchDaemons/dev-ip-loopback.plist` (ADR-0003) | yes |
+| 2 | PF hairpin | `pf_owner = system`, or dev-ip anchor loaded (`pfctl -a dev-ip -s nat`) | write `/etc/pf.anchors/dev-ip`, append `/etc/pf.conf` include if absent, `pfctl -f` + `-e` | yes |
+| 3 | dnsmasq binary | `command -v dnsmasq` | report + instruct; no auto-install without `--yes` | no |
+| 4 | dnsmasq agent | plist current and `launchctl print gui/$UID/dev-ip-dnsmasq` running | write `dev-ip-dnsmasq.plist`, bootout+bootstrap (ADR-0004) | no |
+| 5 | resolver | `/etc/resolver/devip` byte-equal to desired | write it (ADR-0004) | yes |
+| 6 | hosts.d | dir exists | `mkdir -p` | no |
+| 7 | verify | — | write probe, `dig` it, `rm` — fail loudly on mismatch | no |
 
-Steps 2-3 are the only sudo on a stock Mac; a nix-managed host skips them (detected in step 1), leaving step 6 (`/etc/resolver/devip`) as the sole sudo. `dev-ip deprovision` reverses only what dev-ip installed — never nix's resources.
+Steps 1-2 run when `loopback_owner = dev-ip` and `pf_owner = dev-ip` (default); skip when `system` (ADR-0009). Steps 1-2 are the only sudo on a stock Mac with default ownership; a host deferring to a system manager skips them, leaving step 5 (`/etc/resolver/devip`) as the sole sudo. `dev-ip deprovision` reverses only what dev-ip installed — never external resources.
 
 ## Diagnostics
 
@@ -55,15 +54,16 @@ Steps 2-3 are the only sudo on a stock Mac; a nix-managed host skips them (detec
 **Routing:** loopback **reachability** (native bind+connect probe — proves alias + native reachability, not the hairpin), **pf hairpin loaded** (presence check; required for Docker/cross-IP).
 **Resolution:** dnsmasq **(:5354) answering** (dig probe; failure text distinguishes "agent not running" from "running but no answer"), **system resolver routes .devip** (dscacheutil probe — catches cases where dig passes but system DNS fails).
 
-Each ✗ shows the exact fix (unified diff for owned files — resolver, pf anchor, loopback daemon — or command for actions). `doctor --fix` applies the dev-ip-owned fixes and reports anything it can't (nix-owned, connection issues). See ADR-0007.
+Each ✗ shows the exact fix (unified diff for owned files — resolver, pf anchor, loopback daemon — or command for actions). `doctor --fix` applies the dev-ip-owned fixes and reports anything it can't (system-owned, connection issues). See ADR-0007.
 
 ## Cross-references
 
 - ADR-0001 — name sanitization (`sanitize_name`).
 - ADR-0002 — mkdir-lock for concurrent `alloc`.
-- ADR-0003 — root LaunchDaemon for loopback aliases (steps 1-2 above).
-- ADR-0004 — isolated dnsmasq / TLD choice (steps 4-6 above, and the data-flow diagram at the top of this doc).
+- ADR-0003 — root LaunchDaemon for loopback aliases (step 1 above, gated by `loopback_owner`).
+- ADR-0004 — isolated dnsmasq / TLD choice (steps 3-5 above, and the data-flow diagram at the top of this doc).
 - ADR-0005 — configurable pool range (default `127.0.0.10-99`, see `DEVIP_POOL_START`/`DEVIP_POOL_END`).
 - ADR-0006 — kernel advisory lock via `perl` `flock` for concurrent `alloc` (supersedes ADR-0002).
 - ADR-0007 — `doctor` diagnoses per-component routing/resolution status and applies owned fixes.
 - ADR-0008 — TOML config file with env override + `config` command.
+- ADR-0009 — explicit `loopback_owner` / `pf_owner` config (default `dev-ip`, defer with `system`).

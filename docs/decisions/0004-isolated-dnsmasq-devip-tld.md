@@ -12,4 +12,4 @@ Run a dedicated user LaunchAgent dnsmasq on `127.0.0.1:5354`, `--hostsdir=hosts.
 - Reuse nix's dnsmasq on `:53`/`.test` — port conflict (`:53` in use), and nix already owns `.test` (idle or not, not dev-ip's to repurpose).
 
 ## Consequences
-dev-ip coexists with nix, never clobbers it. One configured TLD = one resolver file, one daemon. `/etc/resolver/<tld>` (step 6) is the sole always-sudo step on a nix host — the loopback/pf steps (ADR-0003) are skipped there. See `docs/architecture/overview.md` for the data-flow diagram.
+dev-ip coexists with any system, never clobbers it. One configured TLD = one resolver file, one daemon. `/etc/resolver/<tld>` (step 5, post-ADR-0009) is the sole always-sudo step when `loopback_owner = system` and `pf_owner = system` — the loopback/pf steps (ADR-0003) skip then. See `docs/architecture/overview.md` for the data-flow diagram and ADR-0009 for the ownership model.

@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Source of truth — read these first
 
-- **`docs/dev-ip-plan.md`** — the full spec: architecture, the 8 `provision` steps, macOS `pf` requirement, idempotency rules, test plan. Authoritative.
+- **`docs/dev-ip-plan.md`** — the full spec: architecture, the 7 `provision` steps (gated by ownership), macOS `pf` requirement, idempotency rules, test plan. Authoritative.
 - **`docs/decisions/`** (ADRs) + **`docs/architecture/overview.md`** — per-decision rationale and current-state architecture. README "Known limitations" tracks the one unverified item (layer-3 VM acceptance).
 
 `ijcd/host-provisioning` merged to `main` — commit only when the author asks — never self-commit.
@@ -16,7 +16,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```sh
-bats test/                 # run all tests (100 tests; bats-core; brew install bats-core)
+bats test/                 # run all tests (104 tests; bats-core; brew install bats-core)
 bats test/registry.bats    # run one file
 bin/dev-ip ip <name>       # allocate + print loopback IP (works now, no sudo)
 bin/dev-ip ls              # list allocations
@@ -26,7 +26,7 @@ bin/dev-ip deprovision     # remove dev-ip's host changes
 bin/dev-ip config          # show / get / set / edit configuration
 ```
 
-`provision` / `doctor` / `deprovision` are fully implemented (`do_provision`, `do_doctor`, `do_deprovision` in `bin/dev-ip`): `do_provision` runs 8 detect-then-mutate `step_*` functions, `do_doctor` probes each routing/resolution component (a live bind+connect reachability probe, `dig`/`dscacheutil` resolve probes, pf presence) and prints the exact fix per failure — `doctor --fix` applies the dev-ip-owned ones. `do_deprovision` reverses only dev-ip's own host changes. Not yet verified: layer-3 acceptance on a real macOS VM — see README "Known limitations".
+`provision` / `doctor` / `deprovision` are fully implemented (`do_provision`, `do_doctor`, `do_deprovision` in `bin/dev-ip`): `do_provision` runs 7 detect-then-mutate `step_*` functions (steps 1-2 gated by `loopback_owner`/`pf_owner` config), `do_doctor` probes each routing/resolution component (a live bind+connect reachability probe, `dig`/`dscacheutil` resolve probes, pf presence) and prints the exact fix per failure — `doctor --fix` applies the dev-ip-owned ones. `do_deprovision` reverses only dev-ip's own host changes. Not yet verified: layer-3 acceptance on a real macOS VM — see README "Known limitations".
 
 ## Architecture — functional core / imperative shell
 

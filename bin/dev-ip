@@ -18,7 +18,6 @@ load_config   # populate DEVIP_* from the config file (env still wins)
 : "${DEVIP_PF_ANCHOR_FILE:=/etc/pf.anchors/dev-ip}"
 
 CHECK=0            # 1 = dry-run (detect + print, never mutate)
-MANAGED_BY_NIX=0   # set by step 1
 
 # _run DESC CMD... -> in --check, print intent only; else log to DEVIP_CALL_LOG and run.
 _run() {
@@ -31,33 +30,11 @@ _run() {
   "$@"
 }
 
-step_classify() {   # step 1
-  if launchctl print system/com.local.loopback-aliases >/dev/null 2>&1; then
-    MANAGED_BY_NIX=1
-    printf 'host: nix-managed (loopback+pf owned by nix; steps 2-3 skip)\n'
-  else
-    printf 'host: stock Mac (dev-ip manages loopback+pf)\n'
-  fi
-}
-
-_pool_aliased() {   # true if every pool IP is already on lo0
-  local o out bounds start end
-  out="$(ifconfig lo0 2>/dev/null)"
-  bounds="$(_pool_bounds)" || return 1
-  start="${bounds% *}"; end="${bounds#* }"
-  for o in $(seq "$start" "$end"); do
-    case "$out" in *"127.0.0.$o "*|*"127.0.0.$o"$'\n'*) ;; *) return 1 ;; esac
-  done
-  return 0
-}
-
-step_loopback() {   # step 2 — stock Mac only, root LaunchDaemon
+step_loopback() {   # step 2 — loopback aliases via a root LaunchDaemon
   local plist="$DEVIP_LAUNCHDAEMONS/dev-ip-loopback.plist" desired
-  if [ "$MANAGED_BY_NIX" -eq 1 ]; then printf 'loopback: nix-managed, skip\n'; return 0; fi
-  # NOTE: "aliased now" != "persisted across boot" — if aliases exist but our
-  # daemon is missing/stale, they won't survive reboot. Spec-conformant detect;
-  # tradeoff accepted, not fixed here.
-  if _pool_aliased; then printf 'loopback: all pool IPs already aliased\n'; return 0; fi
+  if [ "$(_resolve_owner "${DEVIP_LOOPBACK_OWNER:-dev-ip}")" = system ]; then
+    printf 'loopback: system-owned (loopback_owner=system), skip\n'; return 0
+  fi
   desired="$(render_loopback_plist)"
   if [ -f "$plist" ] && printf '%s\n' "$desired" | cmp -s - "$plist"; then
     printf 'loopback: daemon up to date\n'; return 0
@@ -70,11 +47,10 @@ step_loopback() {   # step 2 — stock Mac only, root LaunchDaemon
   _run "launchctl bootstrap system $plist" sudo launchctl bootstrap system "$plist"
 }
 
-step_pf() {   # step 3 — stock Mac only, per-IP hairpin NAT
+step_pf() {   # step 3 — per-IP hairpin NAT anchor
   local anchor="$DEVIP_PF_ANCHOR_FILE" desired changed=0
-  if [ "$MANAGED_BY_NIX" -eq 1 ]; then printf 'pf: nix-managed, skip\n'; return 0; fi
-  if pfctl -a loopback_dev -s nat 2>/dev/null | grep -q '^nat'; then
-    printf 'pf: nix loopback_dev anchor present, skip\n'; return 0
+  if [ "$(_resolve_owner "${DEVIP_PF_OWNER:-dev-ip}")" = system ]; then
+    printf 'pf: system-owned (pf_owner=system), skip\n'; return 0
   fi
   desired="$(render_pf_anchor)"
   if [ "$CHECK" -eq 1 ]; then printf '  would: write %s + load pf anchor\n' "$anchor"; return 0; fi
@@ -194,7 +170,6 @@ step_verify() {   # step 8 — always live (even under doctor/--check)
 }
 
 do_provision() {
-  step_classify
   step_loopback
   step_pf
   step_dnsmasq_bin
@@ -223,7 +198,7 @@ do_deprovision() {
   fi
   [ -f "$DEVIP_PF_ANCHOR_FILE" ] && sudo rm -f "$DEVIP_PF_ANCHOR_FILE"
 
-  # loopback daemon — only if dev-ip installed it (nix's is a different label/path)
+  # loopback daemon — only if dev-ip installed it (a system-owned one is a different label/path)
   if [ -f "$daemon" ]; then
     launchctl bootout system "$daemon" 2>/dev/null || true
     sudo rm -f "$daemon"
@@ -310,10 +285,11 @@ _fix_diff() {   # FILE RENDERED  -> unified diff of on-disk (or empty) vs desire
   diff -u "$cur" <(printf '%s\n' "$2") 2>/dev/null | sed -n '3,$p' | sed 's/^/      /' || true
 }
 
-# _fix_* COMPONENT: in fix mode (fix=1) apply via the step (respecting nix
-# ownership) and return 0 (resolved); else print the fix and return 1
-# (unresolved — nothing gets applied in report mode). nix-managed components
-# stay unresolved even in fix mode. Called only from a ✗ branch of do_doctor.
+# _fix_* COMPONENT: in fix mode (fix=1) apply via the step (respecting
+# loopback_owner/pf_owner) and return 0 (resolved); else print the fix and
+# return 1 (unresolved — nothing gets applied in report mode). system-owned
+# components stay unresolved even in fix mode. Called only from a ✗ branch of
+# do_doctor.
 _fix_resolver() { local fix="$1"
   if [ "$fix" -eq 1 ]; then step_resolver >/dev/null; printf '      → applied\n'; return 0; fi
   _fix_diff "$DEVIP_RESOLVER_DIR/${DEVIP_TLD:-devip}" "$(render_resolver)"
@@ -325,13 +301,17 @@ _fix_agent() { local fix="$1"
   return 1
 }
 _fix_loopback() { local fix="$1"
-  if [ "$MANAGED_BY_NIX" -eq 1 ]; then printf '      nix manages loopback — alias this range in your nix config\n'; return 1; fi
+  if [ "$(_resolve_owner "${DEVIP_LOOPBACK_OWNER:-dev-ip}")" = system ]; then
+    printf '      loopback_owner=system — provide these aliases yourself, or set loopback_owner=dev-ip\n'; return 1
+  fi
   if [ "$fix" -eq 1 ]; then step_loopback >/dev/null; printf '      → applied\n'; return 0; fi
   _fix_diff "$DEVIP_LAUNCHDAEMONS/dev-ip-loopback.plist" "$(render_loopback_plist)"
   return 1
 }
 _fix_pf() { local fix="$1"
-  if [ "$MANAGED_BY_NIX" -eq 1 ]; then printf '      nix manages pf — hairpin owned by nix\n'; return 1; fi
+  if [ "$(_resolve_owner "${DEVIP_PF_OWNER:-dev-ip}")" = system ]; then
+    printf '      pf_owner=system — hairpin owned by your system, or set pf_owner=dev-ip\n'; return 1
+  fi
   if [ "$fix" -eq 1 ]; then step_pf >/dev/null; printf '      → applied\n'; return 0; fi
   _fix_diff "$DEVIP_PF_ANCHOR_FILE" "$(render_pf_anchor)"
   printf '      then: sudo pfctl -f %s && sudo pfctl -e\n' "$DEVIP_PF_CONF"
@@ -340,7 +320,6 @@ _fix_pf() { local fix="$1"
 
 do_doctor() {
   local fix=0; [ "${1:-}" = "--fix" ] && fix=1
-  step_classify >/dev/null 2>&1
   local tld="${DEVIP_TLD:-devip}" probe="__doctor_probe" label ip fqdn fails=0 unresolved=0
   ip="$(alloc_ip "$probe")" || { echo "dev-ip: doctor probe alloc failed" >&2; return 1; }
   # alloc_ip/free_name sanitize the name into a DNS label internally (see
@@ -350,7 +329,7 @@ do_doctor() {
   label="$(sanitize_name "$probe")"
   fqdn="$label.$tld"
 
-  # unresolved = ✗ components --fix did NOT resolve: nix-deferred, connect-fail,
+  # unresolved = ✗ components --fix did NOT resolve: system-owner-deferred, connect-fail,
   # and (report mode only, since nothing gets applied) every ✗.
   printf 'Routing:\n'
   case "$(_probe_route "$ip")" in

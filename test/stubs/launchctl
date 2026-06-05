@@ -2,8 +2,6 @@
 # Fake launchctl. Logs argv; drives detect branches via DEVIP_STUB_*.
 printf 'launchctl %s\n' "$*" >> "${DEVIP_CALL_LOG:-/dev/null}"
 case "$*" in
-  "print system/com.local.loopback-aliases")
-    [ -n "${DEVIP_STUB_NIX_LOOPBACK:-}" ] && exit 0 || exit 1 ;;
   "print gui/"*"/dev-ip-dnsmasq")
     [ -n "${DEVIP_STUB_DNSMASQ_RUNNING:-}" ] && exit 0 || exit 1 ;;
 esac

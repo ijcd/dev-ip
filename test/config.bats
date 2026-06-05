@@ -11,13 +11,35 @@ setup() {
   [ "$status" -eq 0 ]
   [ "${#lines[@]}" -eq 11 ]
   [[ "$output" == *"pool_start|DEVIP_POOL_START|10|"* ]]
-  [[ "$output" == *"loopback_owner|DEVIP_LOOPBACK_OWNER|auto|"* ]]
+  [[ "$output" == *"loopback_owner|DEVIP_LOOPBACK_OWNER|dev-ip|"* ]]
   [[ "$output" == *"pf_anchor_file|DEVIP_PF_ANCHOR_FILE|/etc/pf.anchors/dev-ip|"* ]]
 }
 
 @test "_config_known_key accepts a real key, rejects a bogus one" {
   run _config_known_key pool_start; [ "$status" -eq 0 ]
   run _config_known_key bogus;      [ "$status" -eq 1 ]
+}
+
+@test "_resolve_owner: only 'system' defers; everything else is dev-ip" {
+  run _resolve_owner system;  [ "$output" = system ]
+  run _resolve_owner dev-ip;  [ "$output" = dev-ip ]
+  run _resolve_owner auto;    [ "$output" = dev-ip ]
+  run _resolve_owner '';      [ "$output" = dev-ip ]
+  run _resolve_owner garbage; [ "$output" = dev-ip ]
+}
+
+@test "_config_keys owner defaults are dev-ip" {
+  run _config_keys
+  [[ "$output" == *"loopback_owner|DEVIP_LOOPBACK_OWNER|dev-ip|"* ]]
+  [[ "$output" == *"pf_owner|DEVIP_PF_OWNER|dev-ip|"* ]]
+}
+
+@test "_config_validate owner enum is dev-ip|system" {
+  run _config_validate loopback_owner system;  [ "$status" -eq 0 ]
+  run _config_validate loopback_owner dev-ip;  [ "$status" -eq 0 ]
+  run _config_validate pf_owner auto;           [ "$status" -eq 1 ]
+  run _config_validate loopback_owner nix;      [ "$status" -eq 1 ]
+  [[ "$output" == *"dev-ip|system"* ]]
 }
 
 @test "_config_keys: every line has exactly 4 pipe-delimited fields" {
@@ -129,7 +151,7 @@ EOF
   run env DEVIP_CONFIG="$cfg" "$DIR/bin/dev-ip" config set pool_start 999
   [ "$status" -eq 1 ]; [[ "$output" == *"2-254"* ]]
   run env DEVIP_CONFIG="$cfg" "$DIR/bin/dev-ip" config set loopback_owner bogus
-  [ "$status" -eq 1 ]; [[ "$output" == *"auto|nix|dev-ip"* ]]
+  [ "$status" -eq 1 ]; [[ "$output" == *"dev-ip|system"* ]]
   run env DEVIP_CONFIG="$cfg" "$DIR/bin/dev-ip" config set bogus x
   [ "$status" -eq 1 ]; [[ "$output" == *"unknown config key"* ]]
 }
@@ -141,7 +163,7 @@ EOF
   [ -f "$cfg" ]
   run cat "$cfg"
   [[ "$output" == *"# pool_start = 10"* ]]
-  [[ "$output" == *"# loopback_owner = auto"* ]]
+  [[ "$output" == *"# loopback_owner = dev-ip"* ]]
 }
 
 @test "config edit: leaves an existing non-empty file's content" {

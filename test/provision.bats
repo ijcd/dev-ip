@@ -14,24 +14,23 @@ setup() {
   DEVIP="${BATS_TEST_DIRNAME}/../bin/dev-ip"
 }
 
-@test "provision --check classifies a nix host and never mutates" {
-  export DEVIP_STUB_NIX_LOOPBACK=1
+@test "provision --check with owner=system never mutates" {
+  export DEVIP_LOOPBACK_OWNER=system DEVIP_PF_OWNER=system
   run "$DEVIP" provision --check
   [ "$status" -eq 0 ]
-  [[ "$output" == *"nix-managed"* ]]
   # --check writes nothing
   [ ! -d "$DEVIP_HOME/hosts.d" ]
 }
 
 @test "provision creates the hosts.d dir (step 7)" {
-  export DEVIP_STUB_NIX_LOOPBACK=1
+  export DEVIP_LOOPBACK_OWNER=system DEVIP_PF_OWNER=system
   run "$DEVIP" provision
   [ "$status" -eq 0 ]
   [ -d "$DEVIP_HOME/hosts.d" ]
 }
 
 @test "provision writes the resolver file when absent (step 6)" {
-  export DEVIP_STUB_NIX_LOOPBACK=1
+  export DEVIP_LOOPBACK_OWNER=system DEVIP_PF_OWNER=system
   run "$DEVIP" provision
   [ "$status" -eq 0 ]
   [ -f "$DEVIP_RESOLVER_DIR/devip" ]
@@ -41,7 +40,7 @@ port 5354" ]
 }
 
 @test "provision rewrites nothing when the resolver already matches" {
-  export DEVIP_STUB_NIX_LOOPBACK=1
+  export DEVIP_LOOPBACK_OWNER=system DEVIP_PF_OWNER=system
   "$DEVIP" provision              # first run writes it
   : > "$DEVIP_CALL_LOG"           # clear the log
   run "$DEVIP" provision          # second run
@@ -51,7 +50,7 @@ port 5354" ]
 }
 
 @test "provision writes the dnsmasq agent plist and reloads it (steps 4,5)" {
-  export DEVIP_STUB_NIX_LOOPBACK=1
+  export DEVIP_LOOPBACK_OWNER=system DEVIP_PF_OWNER=system
   run "$DEVIP" provision
   [ "$status" -eq 0 ]
   [ -f "$DEVIP_LAUNCHAGENTS/dev-ip-dnsmasq.plist" ]
@@ -60,7 +59,7 @@ port 5354" ]
 }
 
 @test "provision reloads the agent again only if the plist changed" {
-  export DEVIP_STUB_NIX_LOOPBACK=1
+  export DEVIP_LOOPBACK_OWNER=system DEVIP_PF_OWNER=system
   export DEVIP_STUB_DNSMASQ_RUNNING=1
   "$DEVIP" provision
   : > "$DEVIP_CALL_LOG"
@@ -71,7 +70,7 @@ port 5354" ]
 }
 
 @test "doctor resolves the probe end-to-end and leaves no probe behind" {
-  export DEVIP_STUB_NIX_LOOPBACK=1
+  export DEVIP_LOOPBACK_OWNER=system DEVIP_PF_OWNER=system
   export DEVIP_STUB_ROUTE=ok DEVIP_STUB_PF_ENABLED=1 DEVIP_STUB_PF_LOADED=1
   export DEVIP_STUB_SYSRESOLVE_MATCHES=1 DEVIP_STUB_DNSMASQ_RUNNING=1
   "$DEVIP" provision
@@ -85,7 +84,7 @@ port 5354" ]
 
 @test "doctor: routing + resolution report, all green" {
   export DEVIP_STUB_ROUTE=ok DEVIP_STUB_PF_ENABLED=1 DEVIP_STUB_PF_LOADED=1 DEVIP_STUB_SYSRESOLVE_MATCHES=1
-  export DEVIP_STUB_NIX_LOOPBACK=1 DEVIP_STUB_DNSMASQ_RUNNING=1
+  export DEVIP_LOOPBACK_OWNER=system DEVIP_PF_OWNER=system DEVIP_STUB_DNSMASQ_RUNNING=1
   "$DEVIP" provision >/dev/null 2>&1 || true
   run "$DEVIP" doctor
   [ "$status" -eq 0 ]
@@ -103,7 +102,7 @@ port 5354" ]
 }
 
 @test "stock Mac: provision installs loopback daemon + pf anchor (steps 2,3)" {
-  # no DEVIP_STUB_NIX_LOOPBACK -> stock Mac path
+  # default owner=dev-ip -> dev-ip manages loopback+pf
   run "$DEVIP" provision
   [ "$status" -eq 0 ]
   [ -f "$DEVIP_LAUNCHDAEMONS/dev-ip-loopback.plist" ]
@@ -115,8 +114,8 @@ port 5354" ]
   [ "$output" = "0" ]
 }
 
-@test "nix host: provision skips loopback + pf (steps 2,3)" {
-  export DEVIP_STUB_NIX_LOOPBACK=1
+@test "owner=system: provision skips loopback + pf" {
+  export DEVIP_LOOPBACK_OWNER=system DEVIP_PF_OWNER=system
   run "$DEVIP" provision
   [ "$status" -eq 0 ]
   [ ! -f "$DEVIP_LAUNCHDAEMONS/dev-ip-loopback.plist" ]
@@ -134,10 +133,8 @@ port 5354" ]
 }
 
 @test "stock Mac: a second provision makes zero mutations" {
-  export DEVIP_STUB_LOOPBACK_PRESENT=  # first run installs everything
-  "$DEVIP" provision
-  # simulate the world now converged: aliases present, agent running
-  export DEVIP_STUB_LOOPBACK_PRESENT=1
+  "$DEVIP" provision              # first run installs everything
+  # simulate the world now converged: agent running
   export DEVIP_STUB_DNSMASQ_RUNNING=1
   : > "$DEVIP_CALL_LOG"
   run "$DEVIP" provision
@@ -146,8 +143,8 @@ port 5354" ]
   [ "$output" = "0" ]
 }
 
-@test "nix host: a second provision makes zero mutations" {
-  export DEVIP_STUB_NIX_LOOPBACK=1
+@test "owner=system: a second provision makes zero mutations" {
+  export DEVIP_LOOPBACK_OWNER=system DEVIP_PF_OWNER=system
   "$DEVIP" provision
   export DEVIP_STUB_DNSMASQ_RUNNING=1
   : > "$DEVIP_CALL_LOG"
@@ -174,8 +171,8 @@ port 5354" ]
   [ "$status" -eq 0 ]
 }
 
-@test "deprovision leaves the nix loopback daemon alone" {
-  export DEVIP_STUB_NIX_LOOPBACK=1
+@test "deprovision leaves a foreign loopback daemon alone" {
+  export DEVIP_LOOPBACK_OWNER=system DEVIP_PF_OWNER=system
   "$DEVIP" provision
   run "$DEVIP" deprovision
   [ "$status" -eq 0 ]
@@ -201,13 +198,12 @@ port 5354" ]
   run "$DEVIP" provision
   [ "$status" -ne 0 ]
   [[ "$output" == *"DEVIP_POOL"* ]]
-  [[ "$output" != *"host:"* ]]   # the main gate returned before step_classify ran
+  [[ "$output" != *"host:"* ]]   # the pool gate returned before any step ran
 }
 
-@test "doctor warns when a nix-managed host does not alias the configured pool" {
-  export DEVIP_STUB_NIX_LOOPBACK=1        # nix-managed
-  export DEVIP_STUB_LOOPBACK_PRESENT=1    # stub aliases 10-99 only
-  export DEVIP_POOL_START=100 DEVIP_POOL_END=199   # not covered by the stub
+@test "doctor warns when owner=system and the pool is not aliased" {
+  export DEVIP_LOOPBACK_OWNER=system DEVIP_PF_OWNER=system
+  export DEVIP_POOL_START=100 DEVIP_POOL_END=199   # owner=system, dev-ip never aliases this range
   export DEVIP_STUB_DNSMASQ_RUNNING=1
   export DEVIP_STUB_ROUTE=bind-fail       # probe IP (100-199) isn't aliased -> not on lo0
   "$DEVIP" provision >/dev/null 2>&1 || true
@@ -218,7 +214,7 @@ port 5354" ]
 }
 
 @test "doctor shows a diff-style fix for a missing resolver" {
-  export DEVIP_STUB_ROUTE=ok DEVIP_STUB_PF_ENABLED=1 DEVIP_STUB_PF_LOADED=1 DEVIP_STUB_NIX_LOOPBACK=1 DEVIP_STUB_DNSMASQ_RUNNING=1
+  export DEVIP_STUB_ROUTE=ok DEVIP_STUB_PF_ENABLED=1 DEVIP_STUB_PF_LOADED=1 DEVIP_LOOPBACK_OWNER=system DEVIP_PF_OWNER=system DEVIP_STUB_DNSMASQ_RUNNING=1
   # resolver absent -> system resolve fails -> fix shown
   run "$DEVIP" doctor
   [[ "$output" == *"$DEVIP_RESOLVER_DIR/devip"* ]]
@@ -227,7 +223,7 @@ port 5354" ]
 }
 
 @test "doctor shows a real delta (not a full add) for a drifted resolver" {
-  export DEVIP_STUB_ROUTE=ok DEVIP_STUB_PF_ENABLED=1 DEVIP_STUB_PF_LOADED=1 DEVIP_STUB_NIX_LOOPBACK=1 DEVIP_STUB_DNSMASQ_RUNNING=1
+  export DEVIP_STUB_ROUTE=ok DEVIP_STUB_PF_ENABLED=1 DEVIP_STUB_PF_LOADED=1 DEVIP_LOOPBACK_OWNER=system DEVIP_PF_OWNER=system DEVIP_STUB_DNSMASQ_RUNNING=1
   mkdir -p "$DEVIP_RESOLVER_DIR"
   printf 'nameserver 9.9.9.9\n' > "$DEVIP_RESOLVER_DIR/devip"   # present but wrong -> drift, not absence
   run "$DEVIP" doctor
@@ -236,7 +232,7 @@ port 5354" ]
 }
 
 @test "doctor --fix applies the owned fix" {
-  export DEVIP_STUB_ROUTE=ok DEVIP_STUB_PF_ENABLED=1 DEVIP_STUB_PF_LOADED=1 DEVIP_STUB_NIX_LOOPBACK=1 DEVIP_STUB_DNSMASQ_RUNNING=1
+  export DEVIP_STUB_ROUTE=ok DEVIP_STUB_PF_ENABLED=1 DEVIP_STUB_PF_LOADED=1 DEVIP_LOOPBACK_OWNER=system DEVIP_PF_OWNER=system DEVIP_STUB_DNSMASQ_RUNNING=1
   run "$DEVIP" doctor --fix
   [ "$status" -eq 0 ]                     # owned-only fault, applied -> resolved
   [ -f "$DEVIP_RESOLVER_DIR/devip" ]      # step_resolver ran
@@ -244,18 +240,16 @@ port 5354" ]
   [[ "$output" == *"applied"* ]]
 }
 
-@test "doctor --fix leaves nix-managed loopback/pf to nix (no daemon written)" {
-  export DEVIP_STUB_ROUTE=bind-fail DEVIP_STUB_NIX_LOOPBACK=1 DEVIP_STUB_DNSMASQ_RUNNING=1
+@test "doctor --fix leaves loopback/pf alone when owner=system" {
+  export DEVIP_STUB_ROUTE=bind-fail DEVIP_LOOPBACK_OWNER=system DEVIP_PF_OWNER=system DEVIP_STUB_DNSMASQ_RUNNING=1
   run "$DEVIP" doctor --fix
-  [ "$status" -ne 0 ]                     # nix-owned fault left unresolved
-  [ ! -f "$DEVIP_LAUNCHDAEMONS/dev-ip-loopback.plist" ]   # deferred to nix
-  [[ "$output" == *"nix"* ]]
+  [ "$status" -ne 0 ]                     # system-owned fault left unresolved
+  [ ! -f "$DEVIP_LAUNCHDAEMONS/dev-ip-loopback.plist" ]   # deferred to system
+  [[ "$output" == *"system"* ]]
 }
 
 @test "doctor does not warn when the pool is aliased" {
-  export DEVIP_STUB_NIX_LOOPBACK=1
-  export DEVIP_STUB_LOOPBACK_PRESENT=1    # stub aliases 10-99
-  # default pool 10-99 IS covered by the stub
+  export DEVIP_LOOPBACK_OWNER=system DEVIP_PF_OWNER=system
   export DEVIP_STUB_DNSMASQ_RUNNING=1
   export DEVIP_STUB_ROUTE=ok DEVIP_STUB_PF_ENABLED=1 DEVIP_STUB_PF_LOADED=1 DEVIP_STUB_SYSRESOLVE_MATCHES=1
   "$DEVIP" provision >/dev/null 2>&1 || true
@@ -266,7 +260,7 @@ port 5354" ]
 
 @test "custom DEVIP_TLD: resolver file, verify + doctor probes, and deprovision all use it (not devip)" {
   export DEVIP_TLD=lan
-  export DEVIP_STUB_NIX_LOOPBACK=1
+  export DEVIP_LOOPBACK_OWNER=system DEVIP_PF_OWNER=system
   "$DEVIP" provision >/dev/null 2>&1 || true   # step_verify may not resolve against the
                                                 # dig stub's fixed .devip parsing; only the
                                                 # wiring (file + probed name) is asserted here

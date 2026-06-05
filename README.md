@@ -53,7 +53,7 @@ dev-ip free <name>    # release <name>'s allocation
 dev-ip ls             # list allocations
 dev-ip provision      # converge host: resolver + dnsmasq (+ loopback/pf on a stock Mac)
 dev-ip doctor         # diagnose routing/resolution status per component + show exact fixes
-dev-ip doctor --fix   # apply the fixes dev-ip owns (defers nix-owned loopback/pf)
+dev-ip doctor --fix   # apply the fixes dev-ip owns (defers system-owned loopback/pf)
 dev-ip deprovision    # remove dev-ip's host changes
 ```
 
@@ -69,7 +69,7 @@ docker compose -p my-feature up -d          # compose reads ${LB_IP:-127.0.0.1}
 
 ### Diagnosing routing and resolution
 
-`doctor` probes four checks across two chains: loopback **reachability** (native bind+connect; alias missing if it fails), **pf hairpin loaded** (required for Docker/cross-IP); dnsmasq **(:5354) answering** (dig probe), **system resolver routes .devip** (dscacheutil probe — catches cases where dig passes but system DNS fails). For each failed check, `doctor` shows the exact fix — a unified diff for owned files (resolver, pf anchor, loopback daemon), a command for actions. `doctor --fix` applies the dev-ip-owned fixes (deferring nix-managed loopback/pf). See ADR-0007.
+`doctor` probes four checks across two chains: loopback **reachability** (native bind+connect; alias missing if it fails), **pf hairpin loaded** (required for Docker/cross-IP); dnsmasq **(:5354) answering** (dig probe), **system resolver routes .devip** (dscacheutil probe — catches cases where dig passes but system DNS fails). For each failed check, `doctor` shows the exact fix — a unified diff for owned files (resolver, pf anchor, loopback daemon), a command for actions. `doctor --fix` applies the dev-ip-owned fixes (deferring system-owned loopback/pf). See ADR-0007.
 
 ## Configuration
 
@@ -87,6 +87,8 @@ nested tables.
 
 | Var | Default | Purpose |
 |---|---|---|
+| `DEVIP_LOOPBACK_OWNER` | `dev-ip` | who manages loopback aliases (`dev-ip` self-manages; `system` defers to an external loopback manager). |
+| `DEVIP_PF_OWNER` | `dev-ip` | who manages PF hairpin NAT (`dev-ip` self-manages; `system` defers to an external PF manager). |
 | `DEVIP_POOL_START` / `DEVIP_POOL_END` | `10` / `99` | IP pool range (last octet in `127.0.0.x`, `2`–`254`). Set a non-overlapping range to coexist with another allocator. |
 | `DEVIP_TLD` | `devip` | the single TLD served; routed to `/etc/resolver/<tld>`. |
 | `DEVIP_HOME` | `~/.local/share/dev-ip` | registry location. |
@@ -95,7 +97,7 @@ Provisioning paths (`DEVIP_RESOLVER_DIR`, `DEVIP_LAUNCHAGENTS`, `DEVIP_LAUNCHDAE
 
 ## Coexisting with a system that already manages loopback/PF
 
-If a nix-darwin (or similar) setup already aliases the loopback pool and manages PF, `dev-ip provision` detects it and **skips** the loopback + PF steps, deferring to that system — it only writes `/etc/resolver/devip` and its own dnsmasq agent. If you point `DEVIP_POOL_START/END` at a range that system does *not* alias, `doctor` warns that those IPs will resolve but not route.
+By default, dev-ip self-manages loopback aliases and PF NAT rules. If a system (nix-darwin, a hand-rolled launchd plist, or anything else) already manages the loopback pool and PF, set `loopback_owner = system` and `pf_owner = system` in `config.toml` (or via `DEVIP_LOOPBACK_OWNER` / `DEVIP_PF_OWNER` env vars) to defer to it. dev-ip will skip those steps and only write `/etc/resolver/devip` and its own dnsmasq agent. If you point `DEVIP_POOL_START/END` at a range that system does *not* alias, `doctor` warns that those IPs will resolve but not route.
 
 ## Testing
 
