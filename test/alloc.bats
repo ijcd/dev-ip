@@ -2,6 +2,7 @@
 # next_free_ip USED... -> lowest unused IP in the 127.0.0.10-99 pool.
 
 setup() {
+  export DEVIP_CONFIG="$BATS_TEST_TMPDIR/none.toml"   # isolate from the dev's real ~/.config
   source "${BATS_TEST_DIRNAME}/../lib/dev-ip-lib.sh"
 }
 

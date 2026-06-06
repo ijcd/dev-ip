@@ -37,6 +37,17 @@ _run() {
   "$@"
 }
 
+# _reload_dnsmasq -> best-effort SIGHUP so the running agent re-reads hosts.d.
+# macOS dnsmasq has no --hostsdir auto-watch, so we use --addn-hosts, which
+# reloads only on SIGHUP. No sudo — it signals the user's own process. No-op if
+# the agent is not running.
+_reload_dnsmasq() {
+  local pid
+  pid="$(pgrep -f "dnsmasq.*$(_hosts_dir)" 2>/dev/null | head -1)" || true
+  [ -n "${pid:-}" ] && kill -HUP "$pid" 2>/dev/null || true
+  return 0
+}
+
 step_loopback() {   # step 2 — loopback aliases via a root LaunchDaemon
   local plist="$DEVIP_LAUNCHDAEMONS/dev-ip-loopback.plist" desired
   if [ "$(_resolve_owner "${DEVIP_LOOPBACK_OWNER:-dev-ip}")" = system ]; then
@@ -174,6 +185,7 @@ step_verify() {   # step 8 — always live (even under doctor/--check)
   local ip got fqdn
   fqdn="$(sanitize_name probe).${DEVIP_TLD:-devip}"
   ip="$(alloc_ip probe)"
+  _reload_dnsmasq   # --addn-hosts reloads on SIGHUP; make the agent see the probe
   got="$(dig +short @127.0.0.1 -p 5354 "$fqdn" 2>/dev/null | head -1)"
   free_name probe
   if [ "$got" = "$ip" ]; then
@@ -378,6 +390,7 @@ do_doctor() {
   local fix=0; [ "${1:-}" = "--fix" ] && fix=1
   local tld="${DEVIP_TLD:-devip}" probe="__doctor_probe" label ip fqdn fails=0 unresolved=0
   ip="$(alloc_ip "$probe")" || { echo "dev-ip: doctor probe alloc failed" >&2; return 1; }
+  _reload_dnsmasq   # so the agent sees the probe name before we dig for it
   # alloc_ip/free_name sanitize the name into a DNS label internally (see
   # sanitize_name in lib/dev-ip-lib.sh) -- the hosts.d entry is keyed by that
   # sanitized label, not the raw arg, so the probe FQDN must use it too or the
@@ -449,8 +462,8 @@ main() {
     ip | alloc | provision | doctor) _pool_bounds >/dev/null || return 1 ;;
   esac
   case "$cmd" in
-    ip | alloc)  alloc_ip "${1:?dev-ip: name required}" ;;
-    free)        free_name "${1:?dev-ip: name required}" ;;
+    ip | alloc)  alloc_ip "${1:?dev-ip: name required}"; _reload_dnsmasq ;;
+    free)        free_name "${1:?dev-ip: name required}"; _reload_dnsmasq ;;
     ls)          list_allocations ;;
     provision)
       [ "${1:-}" = "--check" ] && CHECK=1

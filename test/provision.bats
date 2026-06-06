@@ -2,6 +2,7 @@
 # provision pipeline via the PATH-stub harness. No root, no VM.
 
 setup() {
+  export DEVIP_CONFIG="$BATS_TEST_TMPDIR/none.toml"   # isolate from the dev's real ~/.config
   export DEVIP_HOME="$BATS_TEST_TMPDIR/devip"
   export DEVIP_RESOLVER_DIR="$BATS_TEST_TMPDIR/resolver"
   export DEVIP_LAUNCHAGENTS="$BATS_TEST_TMPDIR/agents"

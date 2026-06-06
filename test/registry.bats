@@ -3,6 +3,7 @@
 # DEVIP_HOME is redirected to a per-test temp dir (the filesystem seam).
 
 setup() {
+  export DEVIP_CONFIG="$BATS_TEST_TMPDIR/none.toml"   # isolate from the dev's real ~/.config
   source "${BATS_TEST_DIRNAME}/../lib/dev-ip-lib.sh"
   export DEVIP_HOME="$BATS_TEST_TMPDIR/devip"
 }

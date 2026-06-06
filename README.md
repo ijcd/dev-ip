@@ -12,7 +12,7 @@ $ curl http://my-feature.devip:8080/     # after binding a server to 127.0.0.11
 
 ```
   dev-ip ip <name>  ─▶  ~/.local/share/dev-ip/hosts.d/<name>   ("127.0.0.11 my-feature.devip")
-                              │ (dnsmasq --hostsdir auto-reload)
+                              │ (dnsmasq --addn-hosts; SIGHUP on alloc)
                          dnsmasq  (user LaunchAgent, 127.0.0.1:5354)
                               ▲ routed by
                          /etc/resolver/devip   (nameserver 127.0.0.1, port 5354)

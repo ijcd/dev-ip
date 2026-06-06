@@ -2,6 +2,7 @@
 # doctor probe helpers — sourced directly (main is source-guarded).
 
 setup() {
+  export DEVIP_CONFIG="$BATS_TEST_TMPDIR/none.toml"   # isolate from the dev's real ~/.config
   export DEVIP_HOME="$BATS_TEST_TMPDIR/devip"
   export DEVIP_RESOLVER_DIR="$BATS_TEST_TMPDIR/resolver"
   export DEVIP_CALL_LOG="$BATS_TEST_TMPDIR/calls.log"; : > "$DEVIP_CALL_LOG"

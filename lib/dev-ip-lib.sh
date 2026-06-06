@@ -195,7 +195,7 @@ render_dnsmasq_plist() {
     <string>--bind-interfaces</string>
     <string>--no-hosts</string>
     <string>--no-resolv</string>
-    <string>--hostsdir=${hostsdir}</string>
+    <string>--addn-hosts=${hostsdir}</string>
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>

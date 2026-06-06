@@ -2,6 +2,7 @@
 # config registry: _config_keys (all 11 keys), _config_known_key (membership test)
 
 setup() {
+  export DEVIP_CONFIG="$BATS_TEST_TMPDIR/none.toml"   # isolate from the dev's real ~/.config
   DIR="$( cd "$( dirname "$BATS_TEST_FILENAME" )/.." >/dev/null 2>&1 && pwd )"
   source "$DIR/lib/dev-ip-lib.sh"
 }

@@ -2,6 +2,7 @@
 # Concurrent alloc must never hand two names the same IP (mkdir-lock).
 
 setup() {
+  export DEVIP_CONFIG="$BATS_TEST_TMPDIR/none.toml"   # isolate from the dev's real ~/.config
   export DEVIP_HOME="$BATS_TEST_TMPDIR/devip"
   DEVIP="${BATS_TEST_DIRNAME}/../bin/dev-ip"
 }

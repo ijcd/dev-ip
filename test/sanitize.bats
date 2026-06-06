@@ -4,6 +4,7 @@
 # trim leading/trailing '-'; <=63 chars). See ADR-0001.
 
 setup() {
+  export DEVIP_CONFIG="$BATS_TEST_TMPDIR/none.toml"   # isolate from the dev's real ~/.config
   source "${BATS_TEST_DIRNAME}/../lib/dev-ip-lib.sh"
 }
 

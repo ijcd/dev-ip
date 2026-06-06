@@ -3,6 +3,7 @@
 # requirement — a rewrite is a safe no-op when unchanged).
 
 setup() {
+  export DEVIP_CONFIG="$BATS_TEST_TMPDIR/none.toml"   # isolate from the dev's real ~/.config
   source "${BATS_TEST_DIRNAME}/../lib/dev-ip-lib.sh"
 }
 
@@ -18,13 +19,14 @@ port 5354" ]
   [ "$a" = "$b" ]
 }
 
-@test "render_dnsmasq_plist embeds the dnsmasq path, :5354 args, and hostsdir" {
+@test "render_dnsmasq_plist embeds the dnsmasq path, :5354 args, and addn-hosts" {
   run render_dnsmasq_plist /opt/homebrew/bin/dnsmasq /tmp/hd/hosts.d
   [ "$status" -eq 0 ]
   [[ "$output" == *"<string>dev-ip-dnsmasq</string>"* ]]
   [[ "$output" == *"<string>/opt/homebrew/bin/dnsmasq</string>"* ]]
   [[ "$output" == *"<string>--port=5354</string>"* ]]
-  [[ "$output" == *"<string>--hostsdir=/tmp/hd/hosts.d</string>"* ]]
+  [[ "$output" == *"<string>--addn-hosts=/tmp/hd/hosts.d</string>"* ]]
+  [[ "$output" != *"--hostsdir"* ]]   # --hostsdir is unsupported on macOS
   [[ "$output" == *"<string>--no-hosts</string>"* ]]
   [[ "$output" == *"<string>--no-resolv</string>"* ]]
 }
