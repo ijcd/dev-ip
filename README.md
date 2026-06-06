@@ -102,7 +102,7 @@ By default, dev-ip self-manages loopback aliases and PF NAT rules. If a system (
 ## Testing
 
 ```sh
-bats test/            # 109 tests; no root, no VM
+bats test/            # 111 tests; no root, no VM
 bats test/render.bats # one file
 ```
 

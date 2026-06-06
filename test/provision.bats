@@ -277,6 +277,23 @@ port 5354" ]
   [[ "$output" == *"no loopback hairpin"* ]]      # genuine ✗
 }
 
+@test "doctor advises owner=system when the range is already aliased but dev-ip didn't install it" {
+  # route ok (aliases up), default owner=dev-ip, no dev-ip loopback daemon present
+  export DEVIP_STUB_ROUTE=ok DEVIP_STUB_PF_ENABLED=1 DEVIP_STUB_PF_LOADED=1
+  export DEVIP_STUB_DNSMASQ_RUNNING=1 DEVIP_STUB_SYSRESOLVE_MATCHES=1
+  run "$DEVIP" doctor
+  [[ "$output" == *"already aliased, but not by dev-ip"* ]]
+  [[ "$output" == *"loopback_owner=system"* ]]
+}
+
+@test "doctor does not advise once owner=system (user already deferred)" {
+  export DEVIP_STUB_ROUTE=ok DEVIP_STUB_PF_ENABLED=1 DEVIP_STUB_PF_LOADED=1
+  export DEVIP_LOOPBACK_OWNER=system DEVIP_PF_OWNER=system
+  export DEVIP_STUB_DNSMASQ_RUNNING=1 DEVIP_STUB_SYSRESOLVE_MATCHES=1
+  run "$DEVIP" doctor
+  [[ "$output" != *"already aliased, but not by dev-ip"* ]]
+}
+
 @test "custom DEVIP_TLD: resolver file, verify + doctor probes, and deprovision all use it (not devip)" {
   export DEVIP_TLD=lan
   export DEVIP_LOOPBACK_OWNER=system DEVIP_PF_OWNER=system

@@ -337,6 +337,19 @@ _fix_pf() { local fix="$1"
   return 1
 }
 
+# _routing_advisory ROUTE -> hint when the range is already routed by something
+# other than dev-ip, yet loopback_owner is (default) dev-ip — i.e. dev-ip would
+# install a redundant second manager. Fires only when the aliases are up but
+# dev-ip's own loopback daemon is absent.
+_routing_advisory() {
+  [ "$1" = ok ] || return 0
+  [ "$(_resolve_owner "${DEVIP_LOOPBACK_OWNER:-dev-ip}")" = dev-ip ] || return 0
+  [ -f "$DEVIP_LAUNCHDAEMONS/dev-ip-loopback.plist" ] && return 0
+  printf '  note: this range is already aliased, but not by dev-ip — looks system-managed.\n'
+  printf '        set loopback_owner=system + pf_owner=system to defer, or run\n'
+  printf '        `dev-ip provision` to let dev-ip manage it (a second daemon + anchor).\n'
+}
+
 do_doctor() {
   local fix=0; [ "${1:-}" = "--fix" ] && fix=1
   local tld="${DEVIP_TLD:-devip}" probe="__doctor_probe" label ip fqdn fails=0 unresolved=0
@@ -351,7 +364,8 @@ do_doctor() {
   # unresolved = ✗ components --fix did NOT resolve: system-owner-deferred, connect-fail,
   # and (report mode only, since nothing gets applied) every ✗.
   printf 'Routing:\n'
-  case "$(_probe_route "$ip")" in
+  local route; route="$(_probe_route "$ip")"
+  case "$route" in
     ok)           _ck ok "reachability ($ip) — alias up, natively reachable" ;;
     bind-fail)    _ck fail "reachability" "$ip not on lo0"; fails=$((fails+1))
                   _fix_loopback "$fix" || unresolved=$((unresolved+1)) ;;
@@ -363,6 +377,7 @@ do_doctor() {
   if _pf_loaded; then _ck ok "pf hairpin loaded (required for Docker/cross-IP)"
   else _ck fail "pf hairpin" "no loopback hairpin loaded (or pf disabled)"; fails=$((fails+1))
        _fix_pf "$fix" || unresolved=$((unresolved+1)); fi
+  _routing_advisory "$route"
 
   printf 'Resolution:\n'
   if _resolves_dnsmasq "$fqdn" "$ip"; then _ck ok "dnsmasq (:5354) answering"
