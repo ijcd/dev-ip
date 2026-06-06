@@ -89,7 +89,8 @@ nested tables.
 |---|---|---|
 | `DEVIP_LOOPBACK_OWNER` | `dev-ip` | who manages loopback aliases (`dev-ip` self-manages; `system` defers to an external loopback manager). |
 | `DEVIP_PF_OWNER` | `dev-ip` | who manages PF hairpin NAT (`dev-ip` self-manages; `system` defers to an external PF manager). |
-| `DEVIP_POOL_START` / `DEVIP_POOL_END` | `10` / `99` | IP pool range (last octet in `127.0.0.x`, `2`–`254`). Set a non-overlapping range to coexist with another allocator. |
+| `DEVIP_POOL_START` / `DEVIP_POOL_END` | `10` / `99` | IP pool range. Each bound is a bare octet (`= 127.0.0.N`) **or** a full `127.x.x.x` address — the pool can sit anywhere in `127.0.0.0/8`, not just one `/24`. Set a non-overlapping range to coexist with another allocator. |
+| `DEVIP_POOL_MAX` | `65536` | max pool size in IPs. `provision` writes one PF rule + `lo0` alias per IP, so this caps the range (a `/8`-spanning range would blow up the anchor). |
 | `DEVIP_TLD` | `devip` | the single TLD served; routed to `/etc/resolver/<tld>`. |
 | `DEVIP_HOME` | `~/.local/share/dev-ip` | registry location. |
 
