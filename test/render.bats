@@ -53,9 +53,10 @@ port 5354" ]
   run render_loopback_plist
   [ "$status" -eq 0 ]
   [[ "$output" == *"<string>dev-ip-loopback</string>"* ]]
-  [[ "$output" == *"ifconfig lo0 alias 127.0.0."* ]]
+  [[ "$output" == *'alias $ip up'* ]]
   [[ "$output" == *"<key>RunAtLoad</key><true/>"* ]]
-  [[ "$output" == *"seq 10 99"* ]]
+  [[ "$output" == *"for ip in "* ]]
+  [[ "$output" == *"127.0.0.99;"* ]]   # explicit IP list ends at the range end
 }
 
 @test "render_loopback_plist is deterministic" {
@@ -75,7 +76,8 @@ port 5354" ]
 @test "render_loopback_plist honors the configured pool range" {
   export DEVIP_POOL_START=100 DEVIP_POOL_END=199
   run render_loopback_plist
-  [[ "$output" == *'$(seq 100 199)'* ]]
-  [[ "$output" == *'alias 127.0.0.$i up'* ]]
-  [[ "$output" != *'seq 10 99'* ]]
+  [[ "$output" == *"127.0.0.100 "* ]]     # range start aliased
+  [[ "$output" == *"127.0.0.199;"* ]]     # range end aliased
+  [[ "$output" == *'alias $ip up'* ]]
+  [[ "$output" != *"127.0.0.50"* ]]       # out-of-range not included
 }

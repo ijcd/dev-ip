@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 printf 'pfctl %s\n' "$*" >> "${DEVIP_CALL_LOG:-/dev/null}"
 case "$*" in
-  "-s info")            [ -n "${DEVIP_STUB_PF_ENABLED:-}" ] && echo "Status: Enabled" || echo "Status: Disabled" ;;
-  "-a dev-ip -s nat")   [ -n "${DEVIP_STUB_PF_LOADED:-}" ] && echo "nat on lo0 from 127.0.0.10 to 127.0.0.10 -> 127.0.0.1" ;;
+  "-s info")                  [ -n "${DEVIP_STUB_PF_ENABLED:-}" ] && echo "Status: Enabled" || echo "Status: Disabled" ;;
+  "-s Anchors")               [ -n "${DEVIP_STUB_PF_LOADED:-}" ] && echo "loopback_dev" ;;   # models nix's anchor existing
+  "-a loopback_dev -s nat")   [ -n "${DEVIP_STUB_PF_LOADED:-}" ] && echo "nat on lo0 from 127.0.0.10 to 127.0.0.10 -> 127.0.0.1" ;;   # hairpin lives in a non-dev-ip anchor
 esac
 exit 0

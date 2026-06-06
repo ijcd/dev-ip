@@ -149,9 +149,17 @@ _resolves_system() {    # FQDN IP -> 0 if the system resolver answers with IP
 }
 
 # --- doctor presence checks (which fix to show) ---------------------------
-_pf_loaded() {   # pf enabled AND the dev-ip anchor has nat rules
-  pfctl -s info 2>/dev/null | grep -q 'Status: Enabled' || return 1
-  pfctl -a dev-ip -s nat 2>/dev/null | grep -q '^nat'
+_pf_loaded() {   # pf enabled AND a loopback hairpin in the main ruleset or ANY
+  # anchor — owner-agnostic (dev-ip's own, nix's loopback_dev, a hand-rolled
+  # one). pf reads need root; sudo caches after the first call. macOS pf does
+  # not recurse anchors, so enumerate them (`-s Anchors`) and query each.
+  local _a
+  sudo pfctl -s info 2>/dev/null | grep -q 'Status: Enabled' || return 1
+  { sudo pfctl -s nat 2>/dev/null
+    sudo pfctl -s Anchors 2>/dev/null | while read -r _a; do
+      [ -n "$_a" ] && sudo pfctl -a "$_a" -s nat 2>/dev/null
+    done
+  } | grep -q 'nat on lo0 .* -> 127\.0\.0\.1'
 }
 _agent_running() { launchctl print "gui/$(id -u)/dev-ip-dnsmasq" >/dev/null 2>&1; }
 
@@ -216,11 +224,22 @@ _config_src() {   # KEY -> env|config|default from DEVIP_CONFIG_SOURCES
 
 _config_show() {
   local cfg; cfg="$(_config_path)"
-  local key env def desc val
+  local key env def desc val kw=3 vw=5
+  # pass 1 — widest key and value, so columns don't go ragged on long paths
   while IFS='|' read -r key env def desc; do
     [ -n "$key" ] || continue
     val="$(printenv "$env" 2>/dev/null || printf '%s' "$def")"
-    printf '%-16s = %-28s (%s)\n' "$key" "$val" "$(_config_src "$key")"
+    [ "${#key}" -gt "$kw" ] && kw=${#key}
+    [ "${#val}" -gt "$vw" ] && vw=${#val}
+  done <<EOF
+$(_config_keys)
+EOF
+  printf '# %-*s   %-*s  source     what it does\n' "$kw" "key" "$vw" "value"
+  # pass 2 — aligned rows
+  while IFS='|' read -r key env def desc; do
+    [ -n "$key" ] || continue
+    val="$(printenv "$env" 2>/dev/null || printf '%s' "$def")"
+    printf '%-*s = %-*s  %-9s # %s\n' "$kw" "$key" "$vw" "$val" "($(_config_src "$key"))" "$desc"
   done <<EOF
 $(_config_keys)
 EOF
@@ -340,8 +359,9 @@ do_doctor() {
                   printf '      something is blocking loopback connect — check a local firewall / pf ruleset\n'
                   unresolved=$((unresolved+1)) ;;
   esac
+  sudo -n true 2>/dev/null || printf '  (reading the pf ruleset needs root — sudo will prompt)\n'
   if _pf_loaded; then _ck ok "pf hairpin loaded (required for Docker/cross-IP)"
-  else _ck fail "pf hairpin" "anchor not loaded or pf disabled"; fails=$((fails+1))
+  else _ck fail "pf hairpin" "no loopback hairpin loaded (or pf disabled)"; fails=$((fails+1))
        _fix_pf "$fix" || unresolved=$((unresolved+1)); fi
 
   printf 'Resolution:\n'

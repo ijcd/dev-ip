@@ -183,21 +183,21 @@ port 5354" ]
   export DEVIP_POOL_START=99 DEVIP_POOL_END=10
   run "$DEVIP" ip web
   [ "$status" -ne 0 ]
-  [[ "$output" == *"DEVIP_POOL"* ]]
+  [[ "$output" == *"pool"* ]]
 }
 
 @test "provision on a stock Mac aliases the configured range" {
   export DEVIP_POOL_START=100 DEVIP_POOL_END=102
   run "$DEVIP" provision
   [ "$status" -eq 0 ]
-  [[ "$(cat "$DEVIP_LAUNCHDAEMONS/dev-ip-loopback.plist")" == *'seq 100 102'* ]]
+  [[ "$(cat "$DEVIP_LAUNCHDAEMONS/dev-ip-loopback.plist")" == *'127.0.0.100 127.0.0.101 127.0.0.102'* ]]
 }
 
 @test "provision fails fast on an invalid DEVIP_POOL range before running any step" {
   export DEVIP_POOL_START=99 DEVIP_POOL_END=10
   run "$DEVIP" provision
   [ "$status" -ne 0 ]
-  [[ "$output" == *"DEVIP_POOL"* ]]
+  [[ "$output" == *"pool"* ]]
   [[ "$output" != *"host:"* ]]   # the pool gate returned before any step ran
 }
 
@@ -256,6 +256,25 @@ port 5354" ]
   run "$DEVIP" doctor
   [ "$status" -eq 0 ]
   [[ "$output" != *"not on lo0"* ]]
+}
+
+@test "doctor reads pf with sudo and counts a hairpin in any anchor (owner-agnostic)" {
+  # PF_LOADED models a hairpin present in some anchor (e.g. nix's loopback_dev),
+  # NOT dev-ip's own. doctor must still see it — and must elevate to read pf.
+  export DEVIP_STUB_ROUTE=ok DEVIP_STUB_PF_ENABLED=1 DEVIP_STUB_PF_LOADED=1
+  export DEVIP_PF_OWNER=system DEVIP_STUB_DNSMASQ_RUNNING=1 DEVIP_STUB_SYSRESOLVE_MATCHES=1
+  run "$DEVIP" doctor
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"pf hairpin loaded"* ]]        # ✓ from a non-dev-ip anchor
+  [[ "$output" != *"no loopback hairpin"* ]]      # no false ✗
+  grep -q "sudo pfctl" "$DEVIP_CALL_LOG"          # it elevated to read pf
+}
+
+@test "doctor reports pf ✗ (with the fix) when no hairpin is loaded anywhere" {
+  export DEVIP_STUB_ROUTE=ok DEVIP_STUB_PF_ENABLED=1   # pf on, but no hairpin rule
+  export DEVIP_STUB_DNSMASQ_RUNNING=1 DEVIP_STUB_SYSRESOLVE_MATCHES=1
+  run "$DEVIP" doctor
+  [[ "$output" == *"no loopback hairpin"* ]]      # genuine ✗
 }
 
 @test "custom DEVIP_TLD: resolver file, verify + doctor probes, and deprovision all use it (not devip)" {

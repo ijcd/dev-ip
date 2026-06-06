@@ -8,13 +8,34 @@ setup() {
 @test "_pool_bounds defaults to 10 99 when env is unset" {
   run _pool_bounds
   [ "$status" -eq 0 ]
-  [ "$output" = "10 99" ]
+  [ "$output" = "127.0.0.10 127.0.0.99" ]   # bare octets expand to full 127.0.0.x
 }
 
 @test "_pool_bounds reads DEVIP_POOL_START/END" {
   export DEVIP_POOL_START=100 DEVIP_POOL_END=199
   run _pool_bounds
-  [ "$output" = "100 199" ]
+  [ "$output" = "127.0.0.100 127.0.0.199" ]
+}
+
+@test "_pool_bounds accepts full 127.x IPs and spans beyond one /24" {
+  export DEVIP_POOL_START=127.1.0.1 DEVIP_POOL_END=127.1.0.20
+  run _pool_bounds
+  [ "$status" -eq 0 ]
+  [ "$output" = "127.1.0.1 127.1.0.20" ]
+}
+
+@test "_pool_bounds rejects a non-127 address" {
+  export DEVIP_POOL_START=10.0.0.1 DEVIP_POOL_END=10.0.0.9
+  run _pool_bounds
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"127.x"* ]]
+}
+
+@test "_pool_bounds rejects a range larger than DEVIP_POOL_MAX" {
+  export DEVIP_POOL_START=127.0.0.2 DEVIP_POOL_END=127.255.255.254
+  run _pool_bounds
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"exceeds DEVIP_POOL_MAX"* ]]
 }
 
 @test "_pool_bounds rejects start > end" {
@@ -60,7 +81,7 @@ setup() {
   alloc_ip b >/dev/null    # 127.0.0.101
   run alloc_ip c           # pool now exhausted
   [ "$status" -ne 0 ]
-  [[ "$output" == *"127.0.0.100-101 exhausted"* ]]
+  [[ "$output" == *"127.0.0.100-127.0.0.101 exhausted"* ]]
 }
 
 @test "next_free_ip with used IPs returns one in-pool and not in the used set" {
