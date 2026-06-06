@@ -19,6 +19,13 @@ load_config   # populate DEVIP_* from the config file (env still wins)
 
 CHECK=0            # 1 = dry-run (detect + print, never mutate)
 
+# doctor colors — only when stdout is a tty; honor NO_COLOR (https://no-color.org).
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+  C_GREEN=$'\033[32m'; C_RED=$'\033[31m'; C_YELLOW=$'\033[33m'; C_BOLD=$'\033[1m'; C_RESET=$'\033[0m'
+else
+  C_GREEN=''; C_RED=''; C_YELLOW=''; C_BOLD=''; C_RESET=''
+fi
+
 # _run DESC CMD... -> in --check, print intent only; else log to DEVIP_CALL_LOG and run.
 _run() {
   local desc="$1"; shift
@@ -294,15 +301,10 @@ _config_edit() {
 }
 
 _ck() {   # _ck ok|fail LABEL [REASON]
-  if [ "$1" = ok ]; then printf '  ✓ %s\n' "$2"
-  else printf '  ✗ %s — %s\n' "$2" "$3"; fi
+  if [ "$1" = ok ]; then printf '  %s✓ %s%s\n' "$C_GREEN" "$2" "$C_RESET"
+  else printf '  %s✗ %s%s — %s\n' "$C_RED" "$2" "$C_RESET" "$3"; fi
 }
 
-_fix_diff() {   # FILE RENDERED  -> unified diff of on-disk (or empty) vs desired
-  local cur="$1"; [ -f "$cur" ] || cur=/dev/null
-  printf '      %s:\n' "$1"
-  diff -u "$cur" <(printf '%s\n' "$2") 2>/dev/null | sed -n '3,$p' | sed 's/^/      /' || true
-}
 
 # _fix_* COMPONENT: in fix mode (fix=1) apply via the step (respecting
 # loopback_owner/pf_owner) and return 0 (resolved); else print the fix and
@@ -313,10 +315,11 @@ _fix_resolver() { local fix="$1" t="${DEVIP_TLD:-devip}" f
   f="$DEVIP_RESOLVER_DIR/$t"
   if [ "$fix" -eq 1 ]; then step_resolver >/dev/null; printf '      → applied\n'; return 0; fi
   printf '      what: %s tells macOS to send *.%s lookups to dev-ip (127.0.0.1:5354).\n' "$f" "$t"
-  printf '      why:  it is missing, so .%s names never reach dnsmasq — they fail even\n' "$t"
-  printf '            when the server is running.\n'
-  printf '      fix:  dev-ip doctor --fix     (writes the file; needs sudo). It will contain:\n'
-  _fix_diff "$f" "$(render_resolver)"
+  printf '      why:  it is missing or wrong, so .%s names never reach dnsmasq — they\n' "$t"
+  printf '            fail even when the server is running.\n'
+  printf '      fix:  dev-ip doctor --fix     # writes it (needs sudo)\n'
+  printf '            — or create %s with exactly these two lines:\n' "$f"
+  render_resolver | sed 's/^/                /'
   return 1
 }
 _fix_agent() { local fix="$1" t="${DEVIP_TLD:-devip}"
@@ -324,7 +327,7 @@ _fix_agent() { local fix="$1" t="${DEVIP_TLD:-devip}"
   printf '      what: dev-ip runs its own dnsmasq on 127.0.0.1:5354 to answer *.%s names.\n' "$t"
   printf '      why:  it is not running, so those names have nothing to resolve them —\n'
   printf '            `curl foo.%s` fails with "could not resolve host".\n' "$t"
-  printf '      fix:  dev-ip doctor --fix     (starts the LaunchAgent, no sudo)\n'
+  printf '      fix:  dev-ip doctor --fix     # starts the LaunchAgent (no sudo)\n'
   return 1
 }
 _fix_loopback() { local fix="$1"
@@ -338,7 +341,7 @@ _fix_loopback() { local fix="$1"
   printf '      what: dev-ip aliases each pool IP onto lo0 (a root LaunchDaemon) so the\n'
   printf '            127.0.0.x addresses exist and accept connections.\n'
   printf '      why:  the pool is not aliased, so services cannot bind or reach their IPs.\n'
-  printf '      fix:  dev-ip doctor --fix     (installs the loopback LaunchDaemon; needs sudo)\n'
+  printf '      fix:  dev-ip doctor --fix     # installs the loopback LaunchDaemon (needs sudo)\n'
   return 1
 }
 _fix_pf() { local fix="$1"
@@ -354,7 +357,7 @@ _fix_pf() { local fix="$1"
   printf '            Docker/cross-IP traffic reach services bound to those aliases.\n'
   printf '      why:  no hairpin is loaded, so cross-IP/Docker access will not work\n'
   printf '            (plain localhost still does).\n'
-  printf '      fix:  dev-ip doctor --fix     (writes + loads the pf anchor; needs sudo)\n'
+  printf '      fix:  dev-ip doctor --fix     # writes + loads the pf anchor (needs sudo)\n'
   return 1
 }
 
@@ -366,7 +369,7 @@ _routing_advisory() {
   [ "$1" = ok ] || return 0
   [ "$(_resolve_owner "${DEVIP_LOOPBACK_OWNER:-dev-ip}")" = dev-ip ] || return 0
   [ -f "$DEVIP_LAUNCHDAEMONS/dev-ip-loopback.plist" ] && return 0
-  printf '  note: this range is already aliased, but not by dev-ip — looks system-managed.\n'
+  printf '  %snote: this range is already aliased, but not by dev-ip — looks system-managed.%s\n' "$C_YELLOW" "$C_RESET"
   printf '        set loopback_owner=system + pf_owner=system to defer, or run\n'
   printf '        `dev-ip provision` to let dev-ip manage it (a second daemon + anchor).\n'
 }
@@ -384,7 +387,7 @@ do_doctor() {
 
   # unresolved = ✗ components --fix did NOT resolve: system-owner-deferred, connect-fail,
   # and (report mode only, since nothing gets applied) every ✗.
-  printf 'Routing:\n'
+  printf '%sRouting:%s\n' "$C_BOLD" "$C_RESET"
   local route; route="$(_probe_route "$ip")"
   case "$route" in
     ok)           _ck ok "reachability ($ip) — alias up, natively reachable" ;;
@@ -400,7 +403,7 @@ do_doctor() {
        _fix_pf "$fix" || unresolved=$((unresolved+1)); fi
   _routing_advisory "$route"
 
-  printf 'Resolution:\n'
+  printf '%sResolution:%s\n' "$C_BOLD" "$C_RESET"
   if _resolves_dnsmasq "$fqdn" "$ip"; then _ck ok "dnsmasq (:5354) answering"
   elif _agent_running; then _ck fail "dnsmasq (:5354)" "agent running but no answer for $fqdn"; fails=$((fails+1))
        _fix_agent "$fix" || unresolved=$((unresolved+1))
@@ -411,13 +414,12 @@ do_doctor() {
        _fix_resolver "$fix" || unresolved=$((unresolved+1)); fi
 
   free_name "$probe"
-  if [ "$fails" -eq 0 ]; then printf '\nAll good — names resolve and route.\n'
+  if [ "$fails" -eq 0 ]; then printf '\n%sAll good — names resolve and route.%s\n' "$C_GREEN" "$C_RESET"
   elif [ "$fix" -eq 0 ]; then
-    printf '\n%s issue(s) above — each shows what it is, why it matters, and the fix.\n' "$fails"
-    printf 'Quickest path:\n'
-    printf '  dev-ip doctor --fix   applies the parts dev-ip owns (dnsmasq + /etc/resolver; sudo for the file)\n'
-    printf '  dev-ip provision      full host setup (loopback + pf too, when dev-ip owns them)\n'
-    printf 'Then re-run `dev-ip doctor` to confirm everything is green.\n'
+    printf '\n%s%s issue(s) above%s — each shows what it is, why it matters, and the fix.\n' "$C_YELLOW" "$fails" "$C_RESET"
+    printf '→ run  dev-ip doctor --fix   # applies the fixes dev-ip owns (sudo for /etc/resolver)\n'
+    printf '  then re-run  dev-ip doctor  to confirm.\n'
+    printf '  (dev-ip provision does the same, as part of a full from-scratch host setup.)\n'
   fi
   if [ "$fix" -eq 1 ]; then [ "$unresolved" -eq 0 ]; else [ "$fails" -eq 0 ]; fi
 }

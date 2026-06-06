@@ -213,22 +213,25 @@ port 5354" ]
   [[ "$output" == *"not on lo0"* ]]
 }
 
-@test "doctor shows a diff-style fix for a missing resolver" {
+@test "doctor shows the required resolver contents (copy-pasteable, not a diff) when missing" {
   export DEVIP_STUB_ROUTE=ok DEVIP_STUB_PF_ENABLED=1 DEVIP_STUB_PF_LOADED=1 DEVIP_LOOPBACK_OWNER=system DEVIP_PF_OWNER=system DEVIP_STUB_DNSMASQ_RUNNING=1
-  # resolver absent -> system resolve fails -> fix shown
+  # resolver absent -> system resolve fails -> fix shows the exact file contents
   run "$DEVIP" doctor
   [[ "$output" == *"$DEVIP_RESOLVER_DIR/devip"* ]]
-  [[ "$output" == *"+nameserver 127.0.0.1"* ]]
+  [[ "$output" == *"nameserver 127.0.0.1"* ]]
+  [[ "$output" == *"port 5354"* ]]
+  [[ "$output" != *"+nameserver"* ]]     # plain content, no diff markers
+  [[ "$output" != *"@@"* ]]
   [[ "$output" == *"doctor --fix"* ]]
 }
 
-@test "doctor shows a real delta (not a full add) for a drifted resolver" {
+@test "doctor still shows the required contents when the resolver is present but wrong" {
   export DEVIP_STUB_ROUTE=ok DEVIP_STUB_PF_ENABLED=1 DEVIP_STUB_PF_LOADED=1 DEVIP_LOOPBACK_OWNER=system DEVIP_PF_OWNER=system DEVIP_STUB_DNSMASQ_RUNNING=1
   mkdir -p "$DEVIP_RESOLVER_DIR"
-  printf 'nameserver 9.9.9.9\n' > "$DEVIP_RESOLVER_DIR/devip"   # present but wrong -> drift, not absence
+  printf 'nameserver 9.9.9.9\n' > "$DEVIP_RESOLVER_DIR/devip"   # present but wrong
   run "$DEVIP" doctor
-  [[ "$output" == *"-nameserver 9.9.9.9"* ]]
-  [[ "$output" == *"+nameserver 127.0.0.1"* ]]
+  [[ "$output" == *"nameserver 127.0.0.1"* ]]
+  [[ "$output" == *"port 5354"* ]]
 }
 
 @test "doctor --fix applies the owned fix" {
