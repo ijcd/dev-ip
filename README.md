@@ -16,7 +16,7 @@ Allocation is an instant, no-sudo file write. Names resolve through a dedicated
 user `dnsmasq` on `127.0.0.1:5354`, routed by `/etc/resolver/devip`. macOS/BSD
 only.
 
-## Getting started
+## Getting Started
 
 ### Requirements
 
