@@ -53,3 +53,32 @@ setup() {
   [ "$status" -ne 0 ]
   [[ "$output" == *usage* ]]
 }
+
+@test "dev-ip export prints an eval-able export line (default DEV_IP)" {
+  run "$DEVIP" export my-app
+  [ "$status" -eq 0 ]
+  [ "$output" = "export DEV_IP=127.0.0.10" ]
+}
+
+@test "dev-ip export takes a custom variable name" {
+  run "$DEVIP" export my-app MYIP
+  [ "$output" = "export MYIP=127.0.0.10" ]
+}
+
+@test "dev-ip export is idempotent — same IP as ip" {
+  a="$("$DEVIP" ip my-app)"
+  run "$DEVIP" export my-app
+  [ "$output" = "export DEV_IP=$a" ]
+}
+
+@test "dev-ip version / --version print the version" {
+  run "$DEVIP" version;   [ "$output" = "dev-ip 0.1.1" ]
+  run "$DEVIP" --version; [ "$output" = "dev-ip 0.1.1" ]
+}
+
+@test "dev-ip help shows usage (alias for --help)" {
+  run "$DEVIP" help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"usage: dev-ip"* ]]
+  [[ "$output" == *"export <name>"* ]]
+}

@@ -103,14 +103,15 @@ after returns the *same* IP. So a project just names itself and asks for its IP;
 no state to store, no sudo.
 
 ```sh
-IP=$(dev-ip ip my-app)     # stable across runs; allocates once, then looks up
+IP=$(dev-ip ip my-app)              # just the IP
+eval "$(dev-ip export my-app)"      # or set $DEV_IP directly (rename it: dev-ip export my-app MYIP)
 ```
 
 **direnv (`.envrc`)** — set `$DEV_IP` automatically when you `cd` into the project:
 
 ```sh
 # .envrc
-export DEV_IP="$(dev-ip ip "$(basename "$PWD")")"
+eval "$(dev-ip export "$(basename "$PWD")")"
 ```
 ```sh
 myserver --host "$DEV_IP"          # or read $DEV_IP in code

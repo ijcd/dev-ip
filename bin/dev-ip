@@ -4,6 +4,8 @@
 # pure core) and performs IO. See docs/dev-ip-plan.md.
 set -euo pipefail
 
+DEVIP_VERSION="0.1.1"
+
 DEVIP_LIB="${DEVIP_LIB:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)/dev-ip-lib.sh}"
 # shellcheck source=../lib/dev-ip-lib.sh
 source "$DEVIP_LIB"
@@ -46,6 +48,14 @@ _reload_dnsmasq() {
   pid="$(pgrep -f "dnsmasq.*$(_hosts_dir)" 2>/dev/null | head -1)" || true
   [ -n "${pid:-}" ] && kill -HUP "$pid" 2>/dev/null || true
   return 0
+}
+
+# _do_export NAME VAR -> print `export VAR=<ip>` for `eval`. Idempotent: allocates
+# on first use, returns the same IP after; reloads dnsmasq so the name resolves.
+_do_export() {
+  local ip; ip="$(alloc_ip "$1")" || return 1
+  _reload_dnsmasq
+  printf 'export %s=%s\n' "$2" "$ip"
 }
 
 step_loopback() {   # step 2 — loopback aliases via a root LaunchDaemon
@@ -484,10 +494,11 @@ usage() {
   cat >&2 <<'EOF'
 usage: dev-ip <command> [args]
 
-  ip <name>      allocate (if needed) and print the loopback IP for <name>
-  alloc <name>   alias for `ip`
-  free <name>    release <name>'s allocation
-  ls             list allocations
+  ip <name>            allocate (if needed) and print the loopback IP for <name>
+  alloc <name>         alias for `ip`
+  export <name> [VAR]  print `export VAR=<ip>` for eval (VAR defaults to DEV_IP)
+  free <name>          release <name>'s allocation
+  ls                   list allocations
   provision      converge host resolver/loopback/pf/dnsmasq   (sudo: resolver)
   doctor         provision --check + an end-to-end resolve probe
   deprovision    remove dev-ip's host changes
@@ -495,6 +506,7 @@ usage: dev-ip <command> [args]
   config get <key>      print one resolved value
   config set <key> <v>  set a value in the config file
   config edit           open the config file in $EDITOR (seeded if empty)
+  version               print the dev-ip version
 EOF
 }
 
@@ -502,10 +514,11 @@ main() {
   local cmd="${1:-}"
   [ "$#" -gt 0 ] && shift
   case "$cmd" in
-    ip | alloc | provision | doctor) _pool_bounds >/dev/null || return 1 ;;
+    ip | alloc | export | provision | doctor) _pool_bounds >/dev/null || return 1 ;;
   esac
   case "$cmd" in
     ip | alloc)  alloc_ip "${1:?dev-ip: name required}"; _reload_dnsmasq ;;
+    export)      _do_export "${1:?dev-ip: name required}" "${2:-DEV_IP}" ;;
     free)        free_name "${1:?dev-ip: name required}"; _reload_dnsmasq ;;
     ls)          list_allocations ;;
     provision)
@@ -514,7 +527,8 @@ main() {
     doctor)      do_doctor "$@" ;;
     deprovision) do_deprovision ;;
     config)      do_config "$@" ;;
-    -h | --help) usage; return 0 ;;
+    version | --version | -v) printf 'dev-ip %s\n' "$DEVIP_VERSION" ;;
+    -h | --help | help) usage; return 0 ;;
     "")          usage; return 2 ;;
     *)           echo "dev-ip: unknown command: $cmd" >&2; usage; return 2 ;;
   esac

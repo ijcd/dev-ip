@@ -176,7 +176,7 @@ EOF
 
 @test "_config_keys covers every user-facing DEVIP_* the CLI reads (drift guard)" {
   # meta/test seams that are intentionally NOT user config keys:
-  allow="DEVIP_CONFIG DEVIP_CONFIG_SOURCES DEVIP_LIB DEVIP_CALL_LOG DEVIP_STUB_ROUTE DEVIP_STUB_PF_ENABLED DEVIP_STUB_PF_LOADED DEVIP_STUB_SYSRESOLVE"
+  allow="DEVIP_VERSION DEVIP_CONFIG DEVIP_CONFIG_SOURCES DEVIP_LIB DEVIP_CALL_LOG DEVIP_STUB_ROUTE DEVIP_STUB_PF_ENABLED DEVIP_STUB_PF_LOADED DEVIP_STUB_SYSRESOLVE"
   reg="$(_config_keys | cut -d'|' -f2)"
   bad=""
   for v in $(grep -rhoE 'DEVIP_[A-Z_]+' "$DIR/bin/dev-ip" "$DIR/lib/dev-ip-lib.sh" | sort -u); do
