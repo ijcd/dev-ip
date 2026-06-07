@@ -298,6 +298,32 @@ port 5354" ]
   [[ "$output" != *"already aliased, but not by dev-ip"* ]]
 }
 
+@test "doctor detects a crash-looping dnsmasq agent (loaded != working)" {
+  export DEVIP_STUB_ROUTE=ok DEVIP_STUB_PF_ENABLED=1 DEVIP_STUB_PF_LOADED=1
+  export DEVIP_LOOPBACK_OWNER=system DEVIP_PF_OWNER=system DEVIP_STUB_SYSRESOLVE_MATCHES=1
+  export DEVIP_STUB_DNSMASQ_NOANSWER=1 DEVIP_STUB_DNSMASQ_CRASHLOOP=1   # loaded but exiting
+  run "$DEVIP" doctor
+  [[ "$output" == *"crash-looping"* ]]     # not the vague "running but no answer"
+  [[ "$output" == *"dnsmasq_bin"* ]]       # fix points at setting a working binary
+}
+
+@test "doctor: dnsmasq not running is reported as 'not running'" {
+  export DEVIP_STUB_ROUTE=ok DEVIP_STUB_PF_ENABLED=1 DEVIP_STUB_PF_LOADED=1
+  export DEVIP_LOOPBACK_OWNER=system DEVIP_PF_OWNER=system DEVIP_STUB_SYSRESOLVE_MATCHES=1
+  export DEVIP_STUB_DNSMASQ_NOANSWER=1     # no agent loaded (launchctl print exits 1)
+  run "$DEVIP" doctor
+  [[ "$output" == *"not running"* ]]
+}
+
+@test "dnsmasq_bin config overrides the binary written into the agent plist" {
+  export DEVIP_LOOPBACK_OWNER=system DEVIP_PF_OWNER=system
+  fake="$BATS_TEST_TMPDIR/mydnsmasq"; printf '#!/bin/sh\n' > "$fake"; chmod +x "$fake"
+  export DEVIP_DNSMASQ_BIN="$fake"
+  run "$DEVIP" provision
+  [ "$status" -eq 0 ]
+  [[ "$(cat "$DEVIP_LAUNCHAGENTS/dev-ip-dnsmasq.plist")" == *"<string>$fake</string>"* ]]
+}
+
 @test "custom DEVIP_TLD: resolver file, verify + doctor probes, and deprovision all use it (not devip)" {
   export DEVIP_TLD=lan
   export DEVIP_LOOPBACK_OWNER=system DEVIP_PF_OWNER=system

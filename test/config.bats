@@ -7,10 +7,10 @@ setup() {
   source "$DIR/lib/dev-ip-lib.sh"
 }
 
-@test "_config_keys lists all 12 keys with env + default columns" {
+@test "_config_keys lists all 13 keys with env + default columns" {
   run _config_keys
   [ "$status" -eq 0 ]
-  [ "${#lines[@]}" -eq 12 ]
+  [ "${#lines[@]}" -eq 13 ]
   [[ "$output" == *"pool_start|DEVIP_POOL_START|10|"* ]]
   [[ "$output" == *"loopback_owner|DEVIP_LOOPBACK_OWNER|dev-ip|"* ]]
   [[ "$output" == *"pf_anchor_file|DEVIP_PF_ANCHOR_FILE|/etc/pf.anchors/dev-ip|"* ]]

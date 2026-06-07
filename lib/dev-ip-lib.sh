@@ -252,6 +252,7 @@ _config_keys() {
 pool_start|DEVIP_POOL_START|10|pool start — bare int (=127.0.0.N) or a 127.x IP
 pool_end|DEVIP_POOL_END|99|pool end — bare int (=127.0.0.N) or a 127.x IP
 pool_max|DEVIP_POOL_MAX|65536|max pool size in IPs (caps per-IP pf/alias cost)
+dnsmasq_bin|DEVIP_DNSMASQ_BIN||dnsmasq binary (blank = prefer brew's, else PATH)
 tld|DEVIP_TLD|devip|resolver TLD served by dnsmasq
 home|DEVIP_HOME|$HOME/.local/share/dev-ip|registry (hosts.d) location
 loopback_owner|DEVIP_LOOPBACK_OWNER|dev-ip|who manages lo0 aliases (dev-ip/system)
@@ -335,6 +336,8 @@ _config_validate() {
     pool_max)
       case "$val" in ''|*[!0-9]*) echo "dev-ip: pool_max must be a positive integer" >&2; return 1 ;; esac
       [ "$val" -ge 1 ] || { echo "dev-ip: pool_max must be >= 1" >&2; return 1; } ;;
+    dnsmasq_bin)
+      [ -n "$val" ] || { echo "dev-ip: dnsmasq_bin must be a path (or unset to auto-detect)" >&2; return 1; } ;;
     loopback_owner|pf_owner)
       case "$val" in dev-ip|system) ;; *) echo "dev-ip: $key must be dev-ip|system" >&2; return 1 ;; esac ;;
     tld)

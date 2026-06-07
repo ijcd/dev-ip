@@ -88,18 +88,31 @@ step_pf() {   # step 3 — per-IP hairpin NAT anchor
   _run "pfctl -e" sudo pfctl -e 2>/dev/null || true
 }
 
+# _dnsmasq_bin -> which dnsmasq to run. dnsmasq_bin config wins; else prefer the
+# Homebrew build (what the formula depend_on's — known-good); else PATH.
+_dnsmasq_bin() {
+  local b
+  b="${DEVIP_DNSMASQ_BIN:-}"
+  [ -n "$b" ] && { printf '%s\n' "$b"; return 0; }
+  for b in /opt/homebrew/opt/dnsmasq/sbin/dnsmasq /usr/local/opt/dnsmasq/sbin/dnsmasq; do
+    [ -x "$b" ] && { printf '%s\n' "$b"; return 0; }
+  done
+  command -v dnsmasq 2>/dev/null || echo /opt/homebrew/bin/dnsmasq
+}
+
 step_dnsmasq_bin() {   # step 4
-  if command -v dnsmasq >/dev/null 2>&1; then
-    printf 'dnsmasq: found (%s)\n' "$(command -v dnsmasq)"
+  local bin; bin="$(_dnsmasq_bin)"
+  if [ -x "$bin" ] || command -v "$bin" >/dev/null 2>&1; then
+    printf 'dnsmasq: %s\n' "$bin"
     return 0
   fi
-  printf 'dnsmasq: MISSING — run `brew install dnsmasq`\n' >&2
+  printf 'dnsmasq: MISSING (%s) — run `brew install dnsmasq` or set dnsmasq_bin\n' "$bin" >&2
   return 1
 }
 
 step_dnsmasq_agent() {   # step 5
   local bin plist desired
-  bin="$(command -v dnsmasq 2>/dev/null || echo /opt/homebrew/bin/dnsmasq)"
+  bin="$(_dnsmasq_bin)"
   plist="$DEVIP_LAUNCHAGENTS/dev-ip-dnsmasq.plist"
   desired="$(render_dnsmasq_plist "$bin" "$(_hosts_dir)")"
 
@@ -180,6 +193,18 @@ _pf_loaded() {   # pf enabled AND a loopback hairpin in the main ruleset or ANY
   } | grep -q 'nat on lo0 .* -> 127\.0\.0\.1'
 }
 _agent_running() { launchctl print "gui/$(id -u)/dev-ip-dnsmasq" >/dev/null 2>&1; }
+# _agent_status -> stopped | crashloop | running. A crash-looping agent (e.g. a
+# dnsmasq build that rejects a flag we use) shows a non-zero last exit code and
+# state=spawn scheduled — "loaded" is not "working", which is what bit us.
+_agent_status() {
+  local out
+  out="$(launchctl print "gui/$(id -u)/dev-ip-dnsmasq" 2>/dev/null)" || { echo stopped; return 0; }
+  case "$out" in
+    *"last exit code = "[1-9]*) echo crashloop ;;
+    *"state = running"*|*"pid = "*)   echo running ;;
+    *)                                echo crashloop ;;
+  esac
+}
 
 step_verify() {   # step 8 — always live (even under doctor/--check)
   local ip got fqdn
@@ -334,12 +359,24 @@ _fix_resolver() { local fix="$1" t="${DEVIP_TLD:-devip}" f
   render_resolver | sed 's/^/                /'
   return 1
 }
-_fix_agent() { local fix="$1" t="${DEVIP_TLD:-devip}"
+_fix_agent() { local fix="$1" state="${2:-stopped}" t="${DEVIP_TLD:-devip}"
   if [ "$fix" -eq 1 ]; then step_dnsmasq_agent >/dev/null; printf '      → applied\n'; return 0; fi
   printf '      what: dev-ip runs its own dnsmasq on 127.0.0.1:5354 to answer *.%s names.\n' "$t"
-  printf '      why:  it is not running, so those names have nothing to resolve them —\n'
-  printf '            `curl foo.%s` fails with "could not resolve host".\n' "$t"
-  printf '      fix:  dev-ip doctor --fix     # starts the LaunchAgent (no sudo)\n'
+  case "$state" in
+    crashloop)
+      printf '      why:  the agent keeps exiting (crash-loop) — usually a dnsmasq build that\n'
+      printf '            rejects a flag dev-ip uses (macOS lacks some Linux-only features).\n'
+      printf '      fix:  point dev-ip at a working dnsmasq, then reload:\n'
+      printf '              dev-ip config set dnsmasq_bin /usr/local/opt/dnsmasq/sbin/dnsmasq\n'
+      printf '              dev-ip doctor --fix\n' ;;
+    running)
+      printf '      why:  it is running but did not answer the probe — its hosts may be stale.\n'
+      printf '      fix:  dev-ip doctor --fix     # reloads the agent (SIGHUP; no sudo)\n' ;;
+    *)
+      printf '      why:  it is not running, so *.%s names have nothing to resolve them —\n' "$t"
+      printf '            `curl foo.%s` fails with "could not resolve host".\n' "$t"
+      printf '      fix:  dev-ip doctor --fix     # starts the LaunchAgent (no sudo)\n' ;;
+  esac
   return 1
 }
 _fix_loopback() { local fix="$1"
@@ -418,10 +455,16 @@ do_doctor() {
 
   printf '%sResolution:%s\n' "$C_BOLD" "$C_RESET"
   if _resolves_dnsmasq "$fqdn" "$ip"; then _ck ok "dnsmasq (:5354) answering"
-  elif _agent_running; then _ck fail "dnsmasq (:5354)" "agent running but no answer for $fqdn"; fails=$((fails+1))
-       _fix_agent "$fix" || unresolved=$((unresolved+1))
-  else _ck fail "dnsmasq (:5354)" "agent not running"; fails=$((fails+1))
-       _fix_agent "$fix" || unresolved=$((unresolved+1)); fi
+  else
+    local astate; astate="$(_agent_status)"
+    case "$astate" in
+      crashloop) _ck fail "dnsmasq (:5354)" "agent is crash-looping (loaded but keeps exiting)" ;;
+      running)   _ck fail "dnsmasq (:5354)" "running but not answering for $fqdn" ;;
+      *)         _ck fail "dnsmasq (:5354)" "not running" ;;
+    esac
+    fails=$((fails+1))
+    _fix_agent "$fix" "$astate" || unresolved=$((unresolved+1))
+  fi
   if _resolves_system "$fqdn" "$ip"; then _ck ok "system resolver routes .$tld"
   else _ck fail "system resolver" ".$tld not routed to :5354"; fails=$((fails+1))
        _fix_resolver "$fix" || unresolved=$((unresolved+1)); fi

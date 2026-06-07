@@ -3,6 +3,12 @@
 printf 'launchctl %s\n' "$*" >> "${DEVIP_CALL_LOG:-/dev/null}"
 case "$*" in
   "print gui/"*"/dev-ip-dnsmasq")
-    [ -n "${DEVIP_STUB_DNSMASQ_RUNNING:-}" ] && exit 0 || exit 1 ;;
+    if [ -n "${DEVIP_STUB_DNSMASQ_CRASHLOOP:-}" ]; then
+      printf '\tstate = spawn scheduled\n\tlast exit code = 1\n'; exit 0
+    elif [ -n "${DEVIP_STUB_DNSMASQ_RUNNING:-}" ]; then
+      printf '\tstate = running\n\tpid = 12345\n\tlast exit code = (never exited)\n'; exit 0
+    else
+      exit 1
+    fi ;;
 esac
 exit 0
