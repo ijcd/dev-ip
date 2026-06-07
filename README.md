@@ -154,7 +154,7 @@ reads a flat subset of TOML (top-level `key = value`, `#` comments).
 | `DEVIP_PF_OWNER` | `dev-ip` | who manages PF hairpin NAT (`dev-ip` / `system`). |
 | `DEVIP_POOL_START` / `DEVIP_POOL_END` | `10` / `99` | pool range. Each bound is a bare octet (`= 127.0.0.N`) **or** a full `127.x.x.x` address — the pool can sit anywhere in `127.0.0.0/8`. |
 | `DEVIP_POOL_MAX` | `65536` | max pool size in IPs (caps the per-IP PF/alias cost). |
-| `DEVIP_TLD` | `devip` | the TLD served, routed via `/etc/resolver/<tld>`. |
+| `DEVIP_TLD` | `devip` | the TLD served, routed via `/etc/resolver/<tld>`. A custom TLD on purpose, not `.test` — `.test` is RFC-reserved but *the* commonly-claimed local-dev TLD (nix, Valet, dnsmasq tutorials), so it's the most likely to already be in use (ADR-0004). |
 | `DEVIP_HOME` | `~/.local/share/dev-ip` | registry location. |
 | `DEVIP_DNSMASQ_BIN` | *(auto)* | dnsmasq binary; blank = prefer the Homebrew build, else PATH. |
 
