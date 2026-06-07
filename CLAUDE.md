@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`dev-ip` — a bash CLI that allocates one loopback IP + hostname per workspace/branch, statically, so multiple isolated dev instances run at once on one machine. Names resolve via a dedicated user `dnsmasq` on `127.0.0.1:5354`, routed by `/etc/resolver/<tld>` (default TLD `.devip`). No mDNS, no `/etc/hosts` edits, no sudoers. macOS/BSD-specific.
+`dev-ip` — a bash CLI that allocates one loopback IP + hostname per workspace/branch, statically, so multiple isolated dev instances run at once on one machine. Names resolve via a dedicated user `dnsmasq` on `127.0.0.1:5354`, routed by `/etc/resolver/<tld>` (default TLD `.devip`). No mDNS, no `/etc/hosts` edits, no `/etc/sudoers` rule (allocation is sudo-free; only `provision` prompts for sudo). macOS/BSD-specific.
 
 ## Source of truth — read these first
 

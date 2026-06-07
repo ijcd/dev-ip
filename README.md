@@ -3,7 +3,8 @@
 Static per-workspace loopback IP + hostname allocator for macOS. Give each
 project or branch its own `127.0.0.x` and a `name.devip` hostname, so several
 isolated dev instances run at once on one machine — no `/etc/hosts` edits, no
-mDNS, no sudoers.
+mDNS, and no `/etc/sudoers` rule (allocation needs no sudo; only the one-time
+`provision` prompts for it).
 
 ```sh
 $ dev-ip ip my-feature

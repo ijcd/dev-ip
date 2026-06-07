@@ -2,7 +2,7 @@
 
 CLI to allocate one loopback IP + hostname per workspace/branch, statically, so multiple
 isolated dev instances (docker **or** native) run at once on one machine. Resolution via a
-dedicated dnsmasq over a user-writable dir. No mDNS, no `/etc/hosts` edits, no sudoers.
+dedicated dnsmasq over a user-writable dir. No mDNS, no `/etc/hosts` edits, no `/etc/sudoers` rule (allocation is sudo-free; only `provision` prompts for sudo).
 Consumers (docker compose, native servers) bind services to the allocated IP.
 
 ## Hard requirements
