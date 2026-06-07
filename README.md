@@ -40,17 +40,25 @@ ln -s ~/src/dev-ip/bin/dev-ip /usr/local/bin/dev-ip   # or add bin/ to PATH
 
 ### First run
 
+**One-time host setup** — makes `.devip` names resolve (prompts for sudo to
+write `/etc/resolver/devip`):
+
 ```sh
-dev-ip ip my-feature          # → 127.0.0.11   (instant, no sudo)
-dev-ip provision              # one-time host setup; sudo only for /etc/resolver
-dev-ip doctor                 # per-component health report + exact fixes
-curl http://my-feature.devip:8080/   # once a server is bound to 127.0.0.11
+dev-ip provision
+dev-ip doctor        # confirm it's green; `dev-ip doctor --fix` applies any gaps
 ```
 
-`ip`/`ls`/`free` never need sudo. `provision` needs sudo only to write
-`/etc/resolver/devip` (and the loopback/PF steps on a stock Mac). If something
-looks off, `dev-ip doctor` tells you what's wrong and `dev-ip doctor --fix`
-applies the parts dev-ip owns.
+**Then, per project** — allocate a stable IP + hostname, bind your app, reach it
+by name (no sudo from here on):
+
+```sh
+IP=$(dev-ip ip my-feature)            # → 127.0.0.11  (same every call)
+myserver --bind "$IP" --port 8080     # bind your app to it
+curl http://my-feature.devip:8080/    # reach it by name
+```
+
+`ip`/`ls`/`free` never need sudo. If something looks off, `dev-ip doctor` tells
+you exactly what's wrong and how to fix it.
 
 ## How it works
 
@@ -88,13 +96,41 @@ dev-ip deprovision    # remove dev-ip's host changes
 dev-ip config         # show / get / set / edit configuration
 ```
 
-A consumer binds its services to the allocated IP:
+## Using it in a project
+
+`dev-ip ip <name>` is **idempotent** — the first call allocates, every call
+after returns the *same* IP. So a project just names itself and asks for its IP;
+no state to store, no sudo.
 
 ```sh
-LB_IP=$(dev-ip ip my-feature)
-docker compose -p my-feature up -d          # compose reads ${LB_IP:-127.0.0.1}
-# or: mix phx.server --ip "$LB_IP"
+IP=$(dev-ip ip my-app)     # stable across runs; allocates once, then looks up
 ```
+
+**direnv (`.envrc`)** — set `$DEV_IP` automatically when you `cd` into the project:
+
+```sh
+# .envrc
+export DEV_IP="$(dev-ip ip "$(basename "$PWD")")"
+```
+```sh
+myserver --host "$DEV_IP"          # or read $DEV_IP in code
+```
+
+**docker-compose** — bind published ports to the allocated IP:
+
+```sh
+export DEV_IP=$(dev-ip ip my-app)
+docker compose up -d               # compose interpolates ${DEV_IP} in ports:
+```
+
+**package.json / Procfile / justfile** — inline it in the dev command:
+
+```jsonc
+// package.json
+"scripts": { "dev": "IP=$(dev-ip ip $npm_package_name) && next dev -H $IP" }
+```
+
+In every case the app reaches its peers by hostname — `curl http://my-app.devip:PORT/`.
 
 ## Configuration
 
