@@ -4,7 +4,7 @@
 # pure core) and performs IO. See docs/dev-ip-plan.md.
 set -euo pipefail
 
-DEVIP_VERSION="0.1.2"
+DEVIP_VERSION="0.1.1"
 
 DEVIP_LIB="${DEVIP_LIB:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)/dev-ip-lib.sh}"
 # shellcheck source=../lib/dev-ip-lib.sh
@@ -103,16 +103,21 @@ step_pf() {   # step 3 — per-IP hairpin NAT anchor
   _run "pfctl -e" sudo pfctl -e 2>/dev/null || true
 }
 
-# _dnsmasq_bin -> which dnsmasq to run. dnsmasq_bin config wins; else prefer the
-# Homebrew build (what the formula depend_on's — known-good); else PATH.
+# _dnsmasq_bin -> which dnsmasq to run. dnsmasq_bin config wins; else ask brew
+# (arch-correct: /opt/homebrew on arm64, /usr/local on Intel — never guess the
+# prefix); else the known keg paths (arm before Intel); else PATH. Never hardcode
+# /usr/local — that's the Intel prefix and points at a missing file on arm64.
 _dnsmasq_bin() {
-  local b
+  local b p
   b="${DEVIP_DNSMASQ_BIN:-}"
   [ -n "$b" ] && { printf '%s\n' "$b"; return 0; }
+  if p="$(brew --prefix dnsmasq 2>/dev/null)" && [ -x "$p/sbin/dnsmasq" ]; then
+    printf '%s\n' "$p/sbin/dnsmasq"; return 0
+  fi
   for b in /opt/homebrew/opt/dnsmasq/sbin/dnsmasq /usr/local/opt/dnsmasq/sbin/dnsmasq; do
     [ -x "$b" ] && { printf '%s\n' "$b"; return 0; }
   done
-  command -v dnsmasq 2>/dev/null || echo /opt/homebrew/bin/dnsmasq
+  command -v dnsmasq 2>/dev/null || echo dnsmasq
 }
 
 step_dnsmasq_bin() {   # step 4
@@ -126,27 +131,36 @@ step_dnsmasq_bin() {   # step 4
 }
 
 step_dnsmasq_agent() {   # step 5
-  local bin plist desired
+  local bin plist desired label
   bin="$(_dnsmasq_bin)"
   plist="$DEVIP_LAUNCHAGENTS/dev-ip-dnsmasq.plist"
+  label="gui/$(id -u)/dev-ip-dnsmasq"
   desired="$(render_dnsmasq_plist "$bin" "$(_hosts_dir)")"
 
+  # Healthy only when the plist is current AND the agent is actually running.
+  # `launchctl print` succeeding is NOT enough — a crashed or throttled agent
+  # still "prints" (bootstrapped ≠ running). Trusting print left a dead agent
+  # in place after a bad-path plist was corrected (Bug 2 / ADR-0015).
   if [ -f "$plist" ] && printf '%s\n' "$desired" | cmp -s - "$plist" \
-     && launchctl print "gui/$(id -u)/dev-ip-dnsmasq" >/dev/null 2>&1; then
+     && [ "$(_agent_status)" = running ]; then
     printf 'dnsmasq agent: running, config current\n'
     return 0
   fi
   _run "mkdir -p $DEVIP_LAUNCHAGENTS" mkdir -p "$DEVIP_LAUNCHAGENTS"
   if [ "$CHECK" -eq 1 ]; then
-    printf '  would: write %s + reload agent\n' "$plist"
+    printf '  would: write %s + (re)start agent\n' "$plist"
     return 0
   fi
   printf '%s\n' "write $plist" >> "${DEVIP_CALL_LOG:-/dev/null}"
   printf '%s\n' "$desired" > "$plist"
-  _run "launchctl bootout gui/$(id -u)/dev-ip-dnsmasq" \
-    launchctl bootout "gui/$(id -u)/dev-ip-dnsmasq" 2>/dev/null || true
+  _run "launchctl bootout $label" launchctl bootout "$label" 2>/dev/null || true
+  # bootstrap loads the (possibly changed) plist; it no-ops or errors when the
+  # label lingers from a prior crash, so don't let its exit abort provision.
   _run "launchctl bootstrap gui/$(id -u) $plist" \
-    launchctl bootstrap "gui/$(id -u)" "$plist"
+    launchctl bootstrap "gui/$(id -u)" "$plist" 2>/dev/null || true
+  # kickstart -k force-kills any stale instance and starts a fresh one — the
+  # reliable (re)start that `load`/`bootstrap` alone don't guarantee.
+  _run "launchctl kickstart -k $label" launchctl kickstart -k "$label"
 }
 
 step_hostsd() {     # step 7
@@ -208,16 +222,24 @@ _pf_loaded() {   # pf enabled AND a loopback hairpin in the main ruleset or ANY
   } | grep -q 'nat on lo0 .* -> 127\.0\.0\.1'
 }
 _agent_running() { launchctl print "gui/$(id -u)/dev-ip-dnsmasq" >/dev/null 2>&1; }
-# _agent_status -> stopped | crashloop | running. A crash-looping agent (e.g. a
-# dnsmasq build that rejects a flag we use) shows a non-zero last exit code and
-# state=spawn scheduled — "loaded" is not "working", which is what bit us.
+# _agent_status -> stopped | notstarted | crashloop | running.
+#   stopped     — not bootstrapped at all (`launchctl print` fails).
+#   running     — has a pid / state=running.
+#   crashloop   — ran and exited non-zero (a build that rejects a flag, port busy).
+#   notstarted  — bootstrapped but never came up (runs=0, never exited) — e.g. a
+#                 ProgramArguments path that doesn't exist (the arm64 bad-path bug).
+# "loaded" is not "working" — reading launchd's own runs/last-exit is the only way
+# to tell these apart; inferring crash-loop from "port silent" mislabels a
+# never-started agent and prescribes a harmful fix (Bug 3 / ADR-0015).
 _agent_status() {
   local out
   out="$(launchctl print "gui/$(id -u)/dev-ip-dnsmasq" 2>/dev/null)" || { echo stopped; return 0; }
   case "$out" in
-    *"last exit code = "[1-9]*) echo crashloop ;;
-    *"state = running"*|*"pid = "*)   echo running ;;
-    *)                                echo crashloop ;;
+    *"state = running"*|*"pid = "*) echo running; return 0 ;;
+  esac
+  case "$out" in
+    *"last exit code = "[1-9]*) echo crashloop ;;   # ran, exited non-zero
+    *)                          echo notstarted ;;  # runs=0 / never exited
   esac
 }
 
@@ -374,19 +396,36 @@ _fix_resolver() { local fix="$1" t="${DEVIP_TLD:-devip}" f
   render_resolver | sed 's/^/                /'
   return 1
 }
-_fix_agent() { local fix="$1" state="${2:-stopped}" t="${DEVIP_TLD:-devip}"
+_fix_agent() { local fix="$1" state="${2:-stopped}" t="${DEVIP_TLD:-devip}" bin
   if [ "$fix" -eq 1 ]; then step_dnsmasq_agent >/dev/null; printf '      → applied\n'; return 0; fi
+  bin="$(_dnsmasq_bin)"
   printf '      what: dev-ip runs its own dnsmasq on 127.0.0.1:5354 to answer *.%s names.\n' "$t"
+  # A missing/wrong binary is the usual root cause behind both never-started and
+  # crash-loop — check it first and name the exact path, don't guess a prefix.
+  if ! { [ -x "$bin" ] || command -v "$bin" >/dev/null 2>&1; }; then
+    printf '      why:  dnsmasq_bin points at a missing/non-executable file:\n'
+    printf '              %s\n' "$bin"
+    printf '      fix:  install dnsmasq, or point dev-ip at the arch-correct binary:\n'
+    printf '              brew install dnsmasq\n'
+    printf '              dev-ip config set dnsmasq_bin "$(brew --prefix dnsmasq)/sbin/dnsmasq"\n'
+    printf '              dev-ip doctor --fix\n'
+    return 1
+  fi
   case "$state" in
     crashloop)
-      printf '      why:  the agent keeps exiting (crash-loop) — usually a dnsmasq build that\n'
-      printf '            rejects a flag dev-ip uses (macOS lacks some Linux-only features).\n'
-      printf '      fix:  point dev-ip at a working dnsmasq, then reload:\n'
-      printf '              dev-ip config set dnsmasq_bin /usr/local/opt/dnsmasq/sbin/dnsmasq\n'
+      printf '      why:  the binary exists but the agent keeps exiting — usually a dnsmasq\n'
+      printf '            build that rejects a flag dev-ip uses, or :5354 already in use.\n'
+      printf '      fix:  test it by hand: %s --test\n' "$bin"
+      printf '            if the build is wrong, point dev-ip at another and re-fix:\n'
+      printf '              dev-ip config set dnsmasq_bin "$(brew --prefix dnsmasq)/sbin/dnsmasq"\n'
       printf '              dev-ip doctor --fix\n' ;;
     running)
       printf '      why:  it is running but did not answer the probe — its hosts may be stale.\n'
       printf '      fix:  dev-ip doctor --fix     # reloads the agent (SIGHUP; no sudo)\n' ;;
+    notstarted)
+      printf '      why:  the agent is installed but never came up (runs=0). `load`/`bootstrap`\n'
+      printf '            can silently no-op on a changed or throttled plist.\n'
+      printf '      fix:  dev-ip doctor --fix     # force-(re)starts it (kickstart -k; no sudo)\n' ;;
     *)
       printf '      why:  it is not running, so *.%s names have nothing to resolve them —\n' "$t"
       printf '            `curl foo.%s` fails with "could not resolve host".\n' "$t"
@@ -473,9 +512,10 @@ do_doctor() {
   else
     local astate; astate="$(_agent_status)"
     case "$astate" in
-      crashloop) _ck fail "dnsmasq (:5354)" "agent is crash-looping (loaded but keeps exiting)" ;;
-      running)   _ck fail "dnsmasq (:5354)" "running but not answering for $fqdn" ;;
-      *)         _ck fail "dnsmasq (:5354)" "not running" ;;
+      crashloop)  _ck fail "dnsmasq (:5354)" "agent crash-looping (ran, keeps exiting non-zero)" ;;
+      notstarted) _ck fail "dnsmasq (:5354)" "agent installed but never started (runs=0)" ;;
+      running)    _ck fail "dnsmasq (:5354)" "running but not answering for $fqdn" ;;
+      *)          _ck fail "dnsmasq (:5354)" "not running (not loaded)" ;;
     esac
     fails=$((fails+1))
     _fix_agent "$fix" "$astate" || unresolved=$((unresolved+1))

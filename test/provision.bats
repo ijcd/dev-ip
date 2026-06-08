@@ -70,6 +70,26 @@ port 5354" ]
   [ "$output" = "0" ]
 }
 
+@test "provision force-restarts the agent with kickstart -k (never a bare load)" {
+  export DEVIP_LOOPBACK_OWNER=system DEVIP_PF_OWNER=system
+  export DEVIP_DNSMASQ_BIN=/usr/bin/true
+  run "$DEVIP" provision
+  [ "$status" -eq 0 ]
+  grep -q "kickstart -k" "$DEVIP_CALL_LOG"
+  ! grep -qE '^launchctl load ' "$DEVIP_CALL_LOG"    # `load` no-ops on a changed plist
+}
+
+@test "provision restarts a bootstrapped-but-dead agent even when the plist is unchanged" {
+  export DEVIP_LOOPBACK_OWNER=system DEVIP_PF_OWNER=system
+  export DEVIP_DNSMASQ_BIN=/usr/bin/true
+  "$DEVIP" provision                       # first run writes plist + starts it
+  export DEVIP_STUB_DNSMASQ_NOTSTARTED=1   # world: plist current but agent never came up
+  : > "$DEVIP_CALL_LOG"
+  run "$DEVIP" provision
+  [ "$status" -eq 0 ]
+  grep -q "kickstart -k" "$DEVIP_CALL_LOG"  # noticed 'not running', forced a restart
+}
+
 @test "doctor resolves the probe end-to-end and leaves no probe behind" {
   export DEVIP_LOOPBACK_OWNER=system DEVIP_PF_OWNER=system
   export DEVIP_STUB_ROUTE=ok DEVIP_STUB_PF_ENABLED=1 DEVIP_STUB_PF_LOADED=1
@@ -301,15 +321,39 @@ port 5354" ]
 @test "doctor detects a crash-looping dnsmasq agent (loaded != working)" {
   export DEVIP_STUB_ROUTE=ok DEVIP_STUB_PF_ENABLED=1 DEVIP_STUB_PF_LOADED=1
   export DEVIP_LOOPBACK_OWNER=system DEVIP_PF_OWNER=system DEVIP_STUB_SYSRESOLVE_MATCHES=1
-  export DEVIP_STUB_DNSMASQ_NOANSWER=1 DEVIP_STUB_DNSMASQ_CRASHLOOP=1   # loaded but exiting
+  export DEVIP_DNSMASQ_BIN=/usr/bin/true                                # a real, runnable binary
+  export DEVIP_STUB_DNSMASQ_NOANSWER=1 DEVIP_STUB_DNSMASQ_CRASHLOOP=1   # ran, keeps exiting non-zero
   run "$DEVIP" doctor
   [[ "$output" == *"crash-looping"* ]]     # not the vague "running but no answer"
   [[ "$output" == *"dnsmasq_bin"* ]]       # fix points at setting a working binary
+  [[ "$output" != *"/usr/local/opt/dnsmasq/sbin/dnsmasq"* ]]   # never the hardcoded Intel path
+}
+
+@test "doctor: a never-started agent (runs=0) is not mislabeled as crash-looping" {
+  export DEVIP_STUB_ROUTE=ok DEVIP_STUB_PF_ENABLED=1 DEVIP_STUB_PF_LOADED=1
+  export DEVIP_LOOPBACK_OWNER=system DEVIP_PF_OWNER=system DEVIP_STUB_SYSRESOLVE_MATCHES=1
+  export DEVIP_DNSMASQ_BIN=/usr/bin/true
+  export DEVIP_STUB_DNSMASQ_NOANSWER=1 DEVIP_STUB_DNSMASQ_NOTSTARTED=1   # bootstrapped, runs=0
+  run "$DEVIP" doctor
+  [[ "$output" == *"never started"* ]]
+  [[ "$output" != *"crash-looping"* ]]
+}
+
+@test "doctor: a missing dnsmasq_bin is named specifically (not a guessed prefix)" {
+  export DEVIP_STUB_ROUTE=ok DEVIP_STUB_PF_ENABLED=1 DEVIP_STUB_PF_LOADED=1
+  export DEVIP_LOOPBACK_OWNER=system DEVIP_PF_OWNER=system DEVIP_STUB_SYSRESOLVE_MATCHES=1
+  export DEVIP_DNSMASQ_BIN="$BATS_TEST_TMPDIR/nope/dnsmasq"             # does not exist
+  export DEVIP_STUB_DNSMASQ_NOANSWER=1 DEVIP_STUB_DNSMASQ_NOTSTARTED=1
+  run "$DEVIP" doctor
+  [[ "$output" == *"$BATS_TEST_TMPDIR/nope/dnsmasq"* ]]   # the exact bad path
+  [[ "$output" == *"missing"* ]]
+  [[ "$output" != *"/usr/local/opt/dnsmasq/sbin/dnsmasq"* ]]
 }
 
 @test "doctor: dnsmasq not running is reported as 'not running'" {
   export DEVIP_STUB_ROUTE=ok DEVIP_STUB_PF_ENABLED=1 DEVIP_STUB_PF_LOADED=1
   export DEVIP_LOOPBACK_OWNER=system DEVIP_PF_OWNER=system DEVIP_STUB_SYSRESOLVE_MATCHES=1
+  export DEVIP_DNSMASQ_BIN=/usr/bin/true
   export DEVIP_STUB_DNSMASQ_NOANSWER=1     # no agent loaded (launchctl print exits 1)
   run "$DEVIP" doctor
   [[ "$output" == *"not running"* ]]

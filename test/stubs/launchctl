@@ -4,7 +4,10 @@ printf 'launchctl %s\n' "$*" >> "${DEVIP_CALL_LOG:-/dev/null}"
 case "$*" in
   "print gui/"*"/dev-ip-dnsmasq")
     if [ -n "${DEVIP_STUB_DNSMASQ_CRASHLOOP:-}" ]; then
-      printf '\tstate = spawn scheduled\n\tlast exit code = 1\n'; exit 0
+      printf '\tstate = spawn scheduled\n\truns = 4\n\tlast exit code = 1\n'; exit 0
+    elif [ -n "${DEVIP_STUB_DNSMASQ_NOTSTARTED:-}" ]; then
+      # bootstrapped but never came up — a missing/bad ProgramArguments path
+      printf '\tstate = not running\n\truns = 0\n\tlast exit code = (never exited)\n'; exit 0
     elif [ -n "${DEVIP_STUB_DNSMASQ_RUNNING:-}" ]; then
       printf '\tstate = running\n\tpid = 12345\n\tlast exit code = (never exited)\n'; exit 0
     else
