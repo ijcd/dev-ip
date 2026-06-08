@@ -72,8 +72,8 @@ setup() {
 }
 
 @test "dev-ip version / --version print the version" {
-  run "$DEVIP" version;   [ "$output" = "dev-ip 0.1.1" ]
-  run "$DEVIP" --version; [ "$output" = "dev-ip 0.1.1" ]
+  run "$DEVIP" version;   [ "$output" = "dev-ip 0.1.2" ]
+  run "$DEVIP" --version; [ "$output" = "dev-ip 0.1.2" ]
 }
 
 @test "dev-ip help shows usage (alias for --help)" {

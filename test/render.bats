@@ -83,3 +83,16 @@ port 5354" ]
   [[ "$output" == *'alias $ip up'* ]]
   [[ "$output" != *"127.0.0.50"* ]]       # out-of-range not included
 }
+
+@test "render_pf_conf_add inserts dev-ip's nat-anchor before the filter anchor" {
+  out="$(printf 'scrub-anchor "com.apple/*"\nnat-anchor "com.apple/*"\nrdr-anchor "com.apple/*"\nanchor "com.apple/*"\nload anchor "com.apple" from "/etc/pf.anchors/com.apple"\n' | render_pf_conf_add /etc/pf.anchors/dev-ip)"
+  na=$(printf '%s\n' "$out" | grep -n 'nat-anchor "dev-ip"' | cut -d: -f1)
+  fa=$(printf '%s\n' "$out" | grep -n '^anchor "com.apple/\*"' | cut -d: -f1)
+  [ -n "$na" ] && [ -n "$fa" ] && [ "$na" -lt "$fa" ]   # translation before filter
+  [[ "$out" == *'load anchor "dev-ip" from "/etc/pf.anchors/dev-ip"'* ]]
+}
+
+@test "render_pf_conf_add appends when there is no translation/filter boundary" {
+  out="$(printf 'scrub-anchor "com.apple/*"\nnat-anchor "com.apple/*"\n' | render_pf_conf_add /x)"
+  [[ "$out" == *'nat-anchor "dev-ip"'* ]]
+}

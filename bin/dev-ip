@@ -4,7 +4,7 @@
 # pure core) and performs IO. See docs/dev-ip-plan.md.
 set -euo pipefail
 
-DEVIP_VERSION="0.1.1"
+DEVIP_VERSION="0.1.2"
 
 DEVIP_LIB="${DEVIP_LIB:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)/dev-ip-lib.sh}"
 # shellcheck source=../lib/dev-ip-lib.sh
@@ -89,8 +89,13 @@ step_pf() {   # step 3 — per-IP hairpin NAT anchor
     changed=1
   fi
   if ! grep -qE '^(nat-anchor|load anchor) "dev-ip"' "$DEVIP_PF_CONF" 2>/dev/null; then
-    printf '%s\n' "append pf.conf include" >> "${DEVIP_CALL_LOG:-/dev/null}"
-    printf 'nat-anchor "dev-ip"\nload anchor "dev-ip" from "%s"\n' "$anchor" | sudo tee -a "$DEVIP_PF_CONF" >/dev/null
+    printf '%s\n' "insert pf.conf nat-anchor" >> "${DEVIP_CALL_LOG:-/dev/null}"
+    # insert in the translation section (not append) — a nat-anchor after a
+    # filter anchor breaks pf rule ordering. Write via a temp file so we never
+    # read and truncate pf.conf in the same pipe.
+    { cat "$DEVIP_PF_CONF" 2>/dev/null || true; } | render_pf_conf_add "$anchor" \
+      | sudo tee "$DEVIP_PF_CONF.devip.tmp" >/dev/null
+    sudo mv "$DEVIP_PF_CONF.devip.tmp" "$DEVIP_PF_CONF"
     changed=1
   fi
   if [ "$changed" -eq 0 ]; then printf 'pf: anchor + pf.conf up to date\n'; return 0; fi

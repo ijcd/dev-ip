@@ -218,6 +218,24 @@ render_pf_anchor() {
   done
 }
 
+# render_pf_conf_add ANCHOR_FILE -> stdin pf.conf to stdout with dev-ip's
+# `nat-anchor` + `load anchor` inserted in the TRANSLATION section (before the
+# first rdr-anchor / filter line), NOT appended at the end. pf enforces rule
+# order (options, scrub, queue, nat/rdr, filter); appending a nat-anchor after
+# the trailing `anchor "com.apple/*"` filter anchor is a syntax error on a real
+# macOS pf.conf. If no translation/filter boundary is found, append.
+render_pf_conf_add() {
+  awk -v a="$1" '
+    !ins && /^(rdr-anchor|dummynet-anchor|anchor[ "]|block|pass)/ {
+      print "nat-anchor \"dev-ip\""
+      print "load anchor \"dev-ip\" from \"" a "\""
+      ins = 1
+    }
+    { print }
+    END { if (!ins) { print "nat-anchor \"dev-ip\""; print "load anchor \"dev-ip\" from \"" a "\"" } }
+  '
+}
+
 # render_loopback_plist -> root LaunchDaemon plist that adds lo0 aliases for the
 # configured pool at boot. Root domain because `ifconfig lo0 alias` needs root.
 render_loopback_plist() {

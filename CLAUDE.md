@@ -16,7 +16,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```sh
-bats test/                 # run all tests (120 tests; bats-core; brew install bats-core)
+bats test/                 # run all tests (124 tests; bats-core; brew install bats-core)
 bats test/registry.bats    # run one file
 bin/dev-ip ip <name>       # allocate + print loopback IP (works now, no sudo)
 bin/dev-ip ls              # list allocations
